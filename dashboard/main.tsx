@@ -106,7 +106,7 @@ export default function App() {
       helpLink="https://osrf.github.io/ros2multirobotbook/rmf-core.html"
       reportIssueLink="https://github.com/open-rmf/rmf-web/issues"
       themes={{ default: isaacbotTheme }}
-      resources={{ fleets: {}, logos: { header: '/resources/logo.png' } }}
+      resources={{ fleets: {}, logos: { header: '/resources/logo.svg' } }}
       tasks={{
         // Delivery and clean are left out: the isaacbot fleet refuses them (fleet config
         // task_capabilities). Isaacbot-specific tasks live in the ISAACBOT TASK dialog.

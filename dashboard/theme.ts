@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-/* Mechatronics Academy colours: the logo's orange on a near-black app bar. */
+/* Mechatronics Academy orange (from the former logo) on a near-black app bar. */
 import { createTheme } from '@mui/material';
 
 const ORANGE = '#ffaa00';
@@ -26,7 +26,7 @@ export const isaacbotTheme = createTheme({
   components: {
     MuiAppBar: {
       styleOverrides: {
-        // The app bar takes primary by default; keep it dark so the round logo stands out.
+        // The app bar takes primary by default; keep it dark so the white IsaacBot logo stands out.
         root: { backgroundColor: BAR, color: '#fff' },
       },
     },

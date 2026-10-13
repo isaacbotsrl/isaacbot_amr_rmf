@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="icons/Logo-Arm-WhiteOrange-372x372-1.png" alt="Mechatronics Academy" width="140">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="icons/isaacbot-lockup-white-bold.svg">
+    <img src="icons/isaacbot-lockup-black-bold.svg" alt="IsaacBot" width="240">
+  </picture>
 </p>
 
 # isaacbot_amr_rmf — Open-RMF fleet management for Ardennes over MQTT
@@ -234,9 +237,8 @@ pinned commit (`RMF_WEB_REF`, the `jazzy` branch the jazzy-nightly images come f
 The API and trajectory URLs are compiled in from the `API_URL` / `TRAJECTORY_URL` build args.
 
 What it changes from the stock dashboard:
-- **Branding:** the logo (`public/resources/logo.png`, the round crop of
-  `icons/Logo-Arm-WhiteOrange-372x372-1.png`), the tab title, the favicon and the orange theme
-  (`theme.ts`).
+- **Branding:** the IsaacBot logo (`public/resources/logo.svg`, the white bold lockup padded for
+  the app bar), the tab title, the favicon (the IsaacBot app icon) and the orange theme (`theme.ts`).
 - **Task list:** NEW TASK keeps only Patrol and Custom Compose. The fleet refuses Delivery
   and Clean.
 - **Isaacbot window** (Map and Robots tabs, also addable on Custom): connection, drive mode, in or out
