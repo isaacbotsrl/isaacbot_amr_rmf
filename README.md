@@ -1,6 +1,6 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="icons/isaacbot-lockup-white-bold.svg">
+    <source media="(prefers-color-scheme: dark)" srcset="icons/isaacbot-lockup-white.svg">
     <img src="icons/isaacbot-lockup-black-bold.svg" alt="IsaacBot" width="240">
   </picture>
 </p>
@@ -237,8 +237,9 @@ pinned commit (`RMF_WEB_REF`, the `jazzy` branch the jazzy-nightly images come f
 The API and trajectory URLs are compiled in from the `API_URL` / `TRAJECTORY_URL` build args.
 
 What it changes from the stock dashboard:
-- **Branding:** the IsaacBot logo (`public/resources/logo.svg`, the white bold lockup padded for
-  the app bar), the tab title, the favicon (the IsaacBot app icon) and the orange theme (`theme.ts`).
+- **Branding:** the official IsaacBot white lockup in the app bar
+  (`public/resources/isaacbot-lockup-white.svg`, from `icons/`), the tab title, the favicon (the
+  black or white IsaacBot mark, following the browser's colour scheme) and the orange theme (`theme.ts`).
 - **Task list:** NEW TASK keeps only Patrol and Custom Compose. The fleet refuses Delivery
   and Clean.
 - **Isaacbot window** (Map and Robots tabs, also addable on Custom): connection, drive mode, in or out

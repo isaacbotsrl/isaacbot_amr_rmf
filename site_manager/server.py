@@ -280,6 +280,9 @@ def ensure_key() -> None:
 
 # --- HTTP ---------------------------------------------------------------------------------------
 
+BRAND_ICONS = ('/isaacbot-mark-black.svg', '/isaacbot-mark-white.svg')
+
+
 def make_handler(manager: SiteManager, static_dir: str):
 
     class Handler(BaseHTTPRequestHandler):
@@ -323,6 +326,10 @@ def make_handler(manager: SiteManager, static_dir: str):
             if path in ('/', '/index.html'):
                 with open(os.path.join(static_dir, 'index.html'), 'rb') as f:
                     return self._send(200, f.read(), 'text/html; charset=utf-8')
+            if path in BRAND_ICONS:
+                # Only the fixed brand marks: no path from the request reaches the disk.
+                with open(os.path.join(static_dir, path[1:]), 'rb') as f:
+                    return self._send(200, f.read(), 'image/svg+xml')
             if path == '/api/status':
                 return self._call(manager.status)
             if path == '/api/isaacbot/maps':

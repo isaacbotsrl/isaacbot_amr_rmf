@@ -177,5 +177,8 @@ def test_http_end_to_end(http):
     assert {s['name'] for s in status['sites']} >= {'lab', 'isaacbot_amr_world'}
 
     assert request(f'{http}/api/sites/lab', 'DELETE')[0] == 400      # active
+    code, kind, body = request(f'{http}/isaacbot-mark-white.svg')
+    assert code == 200 and kind == 'image/svg+xml' and body.startswith(b'<svg')
+    assert request(f'{http}/server.py')[0] == 404
     assert request(f'{http}/sites/..%2F..%2Fetc/preview.png')[0] == 404
     assert request(f'{http}/api/nothing')[0] == 404
