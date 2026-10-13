@@ -1,0 +1,78 @@
+# Copyright 2026 Mechatronics Academy
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Server deployment: RMF + the fleet's MQTT broker on a host reached over WireGuard.
+# Use it through docker/rmf-server.sh, which adds this file and server/.env:
+#
+#   docker/rmf-server.sh init            # once: generates server/.env + the broker logins
+#   docker/rmf-server.sh up -d --build
+#
+# Everything is published on RMF_BIND_IP only (default 10.8.0.1, the server's WireGuard
+# address), never on the server's LAN. `!override` replaces the base file's ports instead of
+# adding to them.
+#
+# The broker requires a login (mosquitto.server.conf + mosquitto.acl):
+#   rmf       this stack's fleet adapter, all of uagv/#
+#   ardennes  the isaacbot's VDA 5050 connector, only its own topics; on the isaacbot set
+#             ISAACBOT_AMR_VDA5050_LOCAL_BROKER=false, ISAACBOT_AMR_VDA5050_BROKER_HOST=<RMF_BIND_IP>,
+#             ISAACBOT_AMR_VDA5050_BROKER_USER=ardennes, ISAACBOT_AMR_VDA5050_BROKER_PASSWORD=<server/.env>,
+#             ISAACBOT_AMR_VDA5050_BROKER_TLS=false (WireGuard already encrypts the link)
+# RMF uses this broker for every site, whatever the site's fleet config names.
+services:
+  mosquitto:
+    volumes: !override
+      - ./mosquitto.server.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto.acl:/mosquitto/config/acl:ro
+      - ./server/mosquitto.passwd:/mosquitto/config/passwd:ro
+      - mosquitto-data:/mosquitto/data
+    ports: !override
+      - "${RMF_BIND_IP:-10.8.0.1}:1883:1883"
+
+  api-server:
+    environment:
+      RMF_API_PUBLIC_URL: http://${RMF_BIND_IP:-10.8.0.1}:${RMF_API_PORT:-8010}
+    volumes:
+      # Task history and dashboard logins (sqlite, created at runtime) survive a recreate.
+      - api-server-db:/ws/run
+    ports: !override
+      - "${RMF_BIND_IP:-10.8.0.1}:${RMF_API_PORT:-8010}:8000"
+
+  dashboard:
+    build:
+      args:
+        API_URL: http://${RMF_BIND_IP:-10.8.0.1}:${RMF_API_PORT:-8010}
+        TRAJECTORY_URL: http://${RMF_BIND_IP:-10.8.0.1}:8006
+        ISAACBOT_AMR_API_URL: http://${RMF_BIND_IP:-10.8.0.1}:8030
+    ports: !override
+      - "${RMF_BIND_IP:-10.8.0.1}:3000:3000"
+
+  rmf:
+    environment:
+      RMF_BROKER_HOST: mosquitto
+      RMF_BROKER_PORT: "1883"
+      RMF_BROKER_USERNAME: rmf
+      RMF_BROKER_PASSWORD: ${RMF_MQTT_PASSWORD:?run docker/rmf-server.sh init}
+    ports: !override
+      - "${RMF_BIND_IP:-10.8.0.1}:8006:8006"
+      - "${RMF_BIND_IP:-10.8.0.1}:8030:8030"
+
+  site-manager:
+    environment:
+      ISAACBOT_AMR_BROKER: mosquitto:1883
+    ports: !override
+      - "${RMF_BIND_IP:-10.8.0.1}:8020:8020"
+
+volumes:
+  mosquitto-data:
+  api-server-db:

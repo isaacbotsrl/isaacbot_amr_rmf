@@ -1,0 +1,54 @@
+<?xml version='1.0' ?>
+<!--
+  Open-RMF core + the Ardennes fleet adapter (ROS 2 Jazzy, in the isaacbot_amr_rmf container).
+  Mirrors rmf_demos' common.launch.xml without doors, lifts or RViz. RMF reaches the isaacbot only
+  over MQTT (VDA 5050), so nothing here shares a ROS graph with the isaacbot.
+-->
+<launch>
+  <arg name="use_sim_time" default="false" description="RMF runs on wall time; the isaacbot's sim clock never reaches it"/>
+  <!-- A site is a building in isaacbot_amr_rmf_maps/maps/<site>/ (level named <site>, which is also the
+       isaacbot's map name / VDA mapId) plus config/fleet_<site>.yaml. isaacbot_amr_world is the Gazebo
+       world; real sites come from scripts/import_isaacbot_amr_map.py. -->
+  <arg name="site" default="isaacbot_amr_world"/>
+  <arg name="building_file" default="$(find-pkg-share isaacbot_amr_rmf_maps)/maps/$(var site)/$(var site).building.yaml"/>
+  <arg name="nav_graph_file" default="$(find-pkg-share isaacbot_amr_rmf_maps)/maps/$(var site)/nav_graphs/0.yaml"/>
+  <arg name="config_file" default="$(find-pkg-share isaacbot_amr_rmf_bringup)/config/fleet_$(var site).yaml"/>
+  <arg name="initial_map" default="$(var site)"/>
+  <arg name="server_uri" default="" description="rmf-web api-server, e.g. ws://api-server:8000/_internal"/>
+  <!-- Empty / 0: the broker named in the site's fleet config (vda5050.broker). -->
+  <arg name="broker_host" default="" description="Override: MQTT broker the isaacbot's VDA 5050 connector uses"/>
+  <arg name="broker_port" default="0"/>
+  <arg name="bidding_time_window" default="2.0"/>
+
+  <node pkg="rmf_traffic_ros2" exec="rmf_traffic_schedule" name="rmf_traffic_schedule_primary" output="both">
+    <param name="use_sim_time" value="$(var use_sim_time)"/>
+  </node>
+
+  <node pkg="rmf_traffic_ros2" exec="rmf_traffic_blockade" output="both">
+    <param name="use_sim_time" value="$(var use_sim_time)"/>
+  </node>
+
+  <node pkg="rmf_building_map_tools" exec="building_map_server" args="$(var building_file)" output="both">
+    <param name="use_sim_time" value="$(var use_sim_time)"/>
+  </node>
+
+  <!-- Schedule/trajectory websocket (port 8006) for the dashboard's map; no RViz. -->
+  <include file="$(find-pkg-share rmf_visualization)/visualization.launch.xml">
+    <arg name="use_sim_time" value="$(var use_sim_time)"/>
+    <arg name="map_name" value="$(var initial_map)"/>
+    <arg name="headless" value="true"/>
+  </include>
+
+  <node pkg="rmf_task_ros2" exec="rmf_task_dispatcher" output="both">
+    <param name="use_sim_time" value="$(var use_sim_time)"/>
+    <param name="bidding_time_window" value="$(var bidding_time_window)"/>
+    <param name="use_unique_hex_string_with_task_id" value="true"/>
+    <param name="server_uri" value="$(var server_uri)"/>
+  </node>
+
+  <node pkg="isaacbot_amr_rmf_fleet_adapter" exec="fleet_adapter" name="isaacbot_amr_fleet_adapter" output="both"
+        args="-c $(var config_file) -n $(var nav_graph_file) --broker-host=$(var broker_host) --broker-port=$(var broker_port)">
+    <param name="use_sim_time" value="$(var use_sim_time)"/>
+    <param name="server_uri" value="$(var server_uri)"/>
+  </node>
+</launch>

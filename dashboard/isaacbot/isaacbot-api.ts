@@ -1,0 +1,132 @@
+// Copyright 2026 Mechatronics Academy
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+/*
+ * Client for the fleet adapter's isaacbot control API (isaacbot_amr_rmf_fleet_adapter
+ * presentation/control_api.py), plus the pure logic the Isaacbot card shows.
+ */
+
+export type DriveModeTarget = 'MANUAL' | 'AUTOMATIC';
+
+export interface RobotSnapshot {
+  name: string;
+  /** VDA 5050 connection state: ONLINE, OFFLINE, CONNECTIONBROKEN, ... */
+  connection: string;
+  /** VDA 5050 operatingMode: AUTOMATIC, MANUAL (Manual or Assisted), SERVICE, ... or ''. */
+  operating_mode: string;
+  /** null until the isaacbot has reported a mode. */
+  in_fleet: boolean | null;
+  blocked_reason: string | null;
+  localized: boolean;
+  battery_soc: number | null;
+  drive_mode_request: {
+    mode: DriveModeTarget;
+    done: boolean;
+    ok: boolean | null;
+    message: string;
+  } | null;
+}
+
+export interface DriveModeAnswer {
+  ok: boolean;
+  message: string;
+  robot?: RobotSnapshot;
+}
+
+export async function fetchRobots(baseUrl: string): Promise<RobotSnapshot[]> {
+  const response = await fetch(`${baseUrl}/api/robots`);
+  if (!response.ok) {
+    throw new Error(`isaacbot control API answered ${response.status}`);
+  }
+  return ((await response.json()) as { robots: RobotSnapshot[] }).robots;
+}
+
+export async function setDriveMode(
+  baseUrl: string,
+  robot: string,
+  mode: DriveModeTarget,
+): Promise<DriveModeAnswer> {
+  const response = await fetch(`${baseUrl}/api/robots/${encodeURIComponent(robot)}/drive_mode`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode }),
+  });
+  const body = await response.json();
+  if (!response.ok) {
+    return { ok: false, message: body.error ?? `isaacbot control API answered ${response.status}` };
+  }
+  return body as DriveModeAnswer;
+}
+
+export type Tone = 'success' | 'warning' | 'error' | 'default';
+
+export interface IsaacbotView {
+  online: boolean;
+  connection: { label: string; tone: Tone };
+  driveMode: { label: string; tone: Tone };
+  fleet: { label: string; tone: Tone };
+  /** Why the isaacbot would not drive now, if anything. */
+  problem: string | null;
+  battery: string;
+  /** Which buttons make sense: the mode it is not in, and only while connected. */
+  canManual: boolean;
+  canAutomatic: boolean;
+}
+
+const MODE_LABELS: Record<string, string> = {
+  AUTOMATIC: 'Automatic',
+  SEMIAUTOMATIC: 'Semi-automatic',
+  MANUAL: 'Manual',
+  SERVICE: 'Service',
+  TEACHIN: 'Teach-in',
+};
+
+/** What the Isaacbot card shows for one robot. */
+export function describeIsaacbot(robot: RobotSnapshot): IsaacbotView {
+  const online = robot.connection === 'ONLINE';
+  const mode = robot.operating_mode;
+  const modeLabel = mode ? (MODE_LABELS[mode] ?? mode) : 'unknown';
+  const automatic = mode === 'AUTOMATIC' || mode === 'SEMIAUTOMATIC';
+
+  let fleet: IsaacbotView['fleet'];
+  if (robot.in_fleet === null) {
+    fleet = { label: 'Not known yet', tone: 'default' };
+  } else if (robot.in_fleet) {
+    fleet = { label: 'In fleet', tone: 'success' };
+  } else {
+    fleet = { label: `Out of fleet (${modeLabel})`, tone: 'warning' };
+  }
+
+  let problem: string | null = null;
+  if (!online) {
+    problem = 'The isaacbot is not connected to the fleet broker.';
+  } else if (!robot.localized) {
+    problem = 'The isaacbot is not localized.';
+  } else if (automatic && robot.blocked_reason) {
+    problem = robot.blocked_reason;
+  }
+
+  return {
+    online,
+    connection: online
+      ? { label: 'Online', tone: 'success' }
+      : { label: robot.connection === 'UNKNOWN' ? 'No news' : 'Offline', tone: 'error' },
+    driveMode: { label: modeLabel, tone: automatic ? 'success' : mode ? 'warning' : 'default' },
+    fleet,
+    problem,
+    battery: robot.battery_soc === null ? 'unknown' : `${Math.round(robot.battery_soc * 100)} %`,
+    canManual: online && mode !== 'MANUAL',
+    canAutomatic: online && !automatic,
+  };
+}

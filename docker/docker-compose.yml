@@ -1,0 +1,124 @@
+# Copyright 2026 Mechatronics Academy
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Open-RMF managing Ardennes over VDA 5050 / MQTT (see ../README.md).
+#
+#   docker compose -f docker/docker-compose.yml up -d --build
+#
+# Then pick the site at http://localhost:8020 (RMF sites page): it imports maps saved on the isaacbot
+# and switches RMF between sites without a rebuild. Sites live in the rmf-sites volume
+# (imported) and in isaacbot_amr_rmf_maps (built in: isaacbot_amr_world, the Gazebo world, plus local CLI imports).
+# Each site's fleet config names the broker: this stack's mosquitto for the Gazebo isaacbot, the
+# isaacbot's own (192.168.1.201:1883) for imported sites.
+#
+# Optional variables:
+#   RMF_SITE                  site RMF runs until one is activated on the page (isaacbot_amr_world)
+#   RMF_BROKER_HOST/PORT      override the site's broker
+#   ISAACBOT_AMR_SSH, ISAACBOT_AMR_SSH_PORT the isaacbot's orchestrator sshd (root@192.168.1.201, 24)
+#   RMF_API_PORT              the api-server's host port (8010, see below)
+# Simulated isaacbot in indoor mode: add -f docker/docker-compose.sim-maps.yml, so the page reads
+# the maps start_sim_isaacbot.sh saves in ~/isaacbot_amr_maps instead of the isaacbot's.
+#
+# Dashboard http://localhost:3000, sites page :8020, api-server :8010, isaacbot control API :8030
+# (the fleet adapter; the dashboard's Isaacbot card), MQTT broker for the simulated isaacbot on host :1884
+# (:1884 because the host may run its own mosquitto on 1883). All ROS traffic stays on this
+# compose network (rmw_cyclonedds_cpp), apart from the isaacbot's ROS 2 Lyrical graph.
+#
+# The api-server is published on RMF_API_PORT (default 8010), not upstream's 8000: a Windows
+# service (Manager.exe) holds 0.0.0.0:8000 on this box, Docker Desktop then silently publishes
+# nothing and the dashboard's login goes to that service. The dashboard is built with the same
+# port (Dockerfile.dashboard). Inside this network RMF still uses api-server:8000.
+name: isaacbot-rmf
+
+services:
+  mosquitto:
+    image: docker.io/library/eclipse-mosquitto:2
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    ports:
+      - "1884:1883"
+    restart: unless-stopped
+
+  api-server:
+    image: ghcr.io/open-rmf/rmf-web/api-server:jazzy-nightly
+    environment:
+      RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
+      RMF_API_SERVER_CONFIG: /config/api_server_config.py
+      RMF_API_PUBLIC_URL: http://localhost:${RMF_API_PORT:-8010}
+    volumes:
+      - ./api_server_config.py:/config/api_server_config.py:ro
+    ports:
+      - "${RMF_API_PORT:-8010}:8000"
+    restart: unless-stopped
+
+  dashboard:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.dashboard
+      args:
+        API_URL: http://localhost:${RMF_API_PORT:-8010}
+        ISAACBOT_AMR_API_URL: http://localhost:8030
+    image: isaacbot-rmf-dashboard:jazzy
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+  rmf:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.rmf
+    image: isaacbot-rmf:jazzy
+    depends_on:
+      - mosquitto
+      - api-server
+    # run_rmf.sh runs RMF for the active site (rmf-sites/active, else RMF_SITE) and restarts it
+    # when the site manager switches sites.
+    command:
+      - run_rmf.sh
+      - server_uri:=ws://api-server:8000/_internal
+    environment:
+      RMF_SITE: ${RMF_SITE:-isaacbot_amr_world}
+      RMF_BROKER_HOST: ${RMF_BROKER_HOST:-}
+      RMF_BROKER_PORT: ${RMF_BROKER_PORT:-}
+    volumes:
+      - rmf-sites:/sites
+    ports:
+      - "8006:8006"   # schedule/trajectory websocket used by the dashboard's map
+      - "8030:8030"   # isaacbot control API (fleet adapter), the dashboard's Isaacbot card
+    restart: unless-stopped
+
+  # The RMF sites page: lists the maps saved on the isaacbot, imports them as sites, activates one.
+  # Reads the isaacbot over ssh with its own key (site-manager-ssh volume); authorize it once with
+  #   docker compose -f docker/docker-compose.yml exec site-manager isaacbot-authorize
+  site-manager:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.rmf
+    image: isaacbot-rmf:jazzy
+    depends_on:
+      - rmf
+    command: [python3, /opt/site_manager/server.py]
+    environment:
+      ISAACBOT_AMR_SSH: ${ISAACBOT_AMR_SSH:-root@192.168.1.201}
+      ISAACBOT_AMR_SSH_PORT: ${ISAACBOT_AMR_SSH_PORT:-24}
+    volumes:
+      - rmf-sites:/sites
+      - site-manager-ssh:/root/.ssh
+    ports:
+      - "8020:8020"
+    restart: unless-stopped
+
+volumes:
+  rmf-sites:
+  site-manager-ssh:

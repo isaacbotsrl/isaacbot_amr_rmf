@@ -1,0 +1,40 @@
+#!/bin/bash
+# Copyright 2026 Mechatronics Academy
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# Lets the RMF site manager read the isaacbot's maps: installs its ssh key on the isaacbot's
+# orchestrator container. Asks for the isaacbot's root password once.
+#
+#   docker compose -f docker/docker-compose.yml exec site-manager isaacbot-authorize
+#
+# The key stays in the site-manager-ssh volume. The isaacbot forgets it when its orchestrator
+# container is recreated (a new release); run this again then. The new container also has new
+# ssh host keys: this shows the new fingerprint and, once confirmed, forgets the old one.
+set -e
+TARGET="${ISAACBOT_AMR_SSH:-root@192.168.1.201}"
+PORT="${ISAACBOT_AMR_SSH_PORT:-24}"
+HOST="${TARGET#*@}"
+KEY="$HOME/.ssh/id_ed25519"
+[ -f "$KEY" ] || ssh-keygen -q -t ed25519 -N '' -C isaacbot-rmf-site-manager -f "$KEY"
+if ssh -p "$PORT" -o BatchMode=yes -o ConnectTimeout=10 "$TARGET" true 2>&1 \
+        | grep -q 'REMOTE HOST IDENTIFICATION HAS CHANGED'; then
+    echo "The isaacbot's ssh host key changed. A new isaacbot release does that. Its keys now:"
+    ssh-keyscan -p "$PORT" "$HOST" 2>/dev/null | ssh-keygen -lf -
+    read -r -p "Trust the new key? Only if the isaacbot was just updated or reflashed [y/N] " answer
+    [ "$answer" = y ] || [ "$answer" = Y ] || { echo "Not changed."; exit 1; }
+    ssh-keygen -q -R "[$HOST]:$PORT" >/dev/null
+fi
+echo "Installing the site manager's key on $TARGET (ssh port $PORT)."
+ssh-copy-id -i "$KEY.pub" -p "$PORT" -o StrictHostKeyChecking=accept-new "$TARGET"
+ssh -p "$PORT" -o BatchMode=yes "$TARGET" true && echo "Done: the RMF sites page can now read the isaacbot's maps."

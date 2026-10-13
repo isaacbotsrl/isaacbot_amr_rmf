@@ -1,0 +1,16 @@
+__pycache__/
+.pytest_cache/
+*.egg-info/
+build/
+install/
+log/
+
+# Sites imported from the isaacbot (scripts/import_isaacbot_amr_map.py) stay local, like those the RMF
+# sites page keeps in the rmf-sites volume. Only the Gazebo site isaacbot_amr_world is tracked.
+isaacbot_amr_rmf_maps/maps/*
+!isaacbot_amr_rmf_maps/maps/isaacbot_amr_world/
+isaacbot_amr_rmf_bringup/config/fleet_*.yaml
+!isaacbot_amr_rmf_bringup/config/fleet_isaacbot_amr_world.yaml
+
+# Server deployment secrets (docker/rmf-server.sh init): broker passwords, mosquitto logins.
+docker/server/

@@ -1,0 +1,60 @@
+# Copyright 2026 Mechatronics Academy
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Open-RMF (ROS 2 Jazzy) + the Ardennes fleet adapter. RMF core has no Lyrical release, and the
+# isaacbot is reached only over MQTT, so this image never needs the isaacbot's ROS graph.
+#
+#   docker compose -f docker/docker-compose.yml build rmf      (context: the isaacbot_amr_rmf repo)
+FROM docker.io/library/ros:jazzy-ros-base
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ros-jazzy-rmf-building-map-tools \
+        ros-jazzy-rmf-demos-tasks \
+        ros-jazzy-rmf-fleet-adapter \
+        ros-jazzy-rmf-fleet-adapter-python \
+        ros-jazzy-rmf-task-ros2 \
+        ros-jazzy-rmf-traffic-ros2 \
+        ros-jazzy-rmf-visualization \
+        ros-jazzy-rmw-cyclonedds-cpp \
+        ros-jazzy-ament-cmake-pytest \
+        python3-paho-mqtt \
+        python3-pytest \
+        python3-yaml \
+        mosquitto-clients \
+        openssh-client \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /rmf_ws
+COPY isaacbot_amr_rmf_fleet_adapter src/isaacbot_amr_rmf/isaacbot_amr_rmf_fleet_adapter
+COPY isaacbot_amr_rmf_maps src/isaacbot_amr_rmf/isaacbot_amr_rmf_maps
+COPY isaacbot_amr_rmf_bringup src/isaacbot_amr_rmf/isaacbot_amr_rmf_bringup
+
+RUN . /opt/ros/jazzy/setup.sh \
+    && colcon build --event-handlers console_direct- \
+    && colcon test --packages-select isaacbot_amr_rmf_fleet_adapter isaacbot_amr_rmf_maps \
+        --event-handlers console_direct- \
+    && colcon test-result --verbose
+
+# Same RMW as the rmf-web api-server image (rmw_cyclonedds_cpp).
+ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+COPY docker/entrypoint.sh /entrypoint.sh
+# RMF supervisor (restarts RMF when the active site changes) and the site manager page, which
+# imports the importer's modules from /opt/isaacbot_amr_rmf_maps_scripts.
+COPY docker/run_rmf.sh /usr/local/bin/run_rmf.sh
+COPY isaacbot_amr_rmf_maps/scripts /opt/isaacbot_amr_rmf_maps_scripts
+COPY site_manager /opt/site_manager
+RUN ln -s /opt/site_manager/isaacbot-authorize /usr/local/bin/isaacbot-authorize
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["run_rmf.sh"]

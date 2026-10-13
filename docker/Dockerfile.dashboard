@@ -1,0 +1,64 @@
+# Copyright 2026 Mechatronics Academy
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Ardennes's dashboard: rmf-web's dashboard framework + our app in ../dashboard (branding, the
+# ISAACBOT TASK dialog). Context: the isaacbot_amr_rmf repo.
+#
+#   docker compose -f docker/docker-compose.yml build dashboard
+#
+# The browser calls the api-server, the trajectory server and the fleet adapter's isaacbot control
+# API directly, so their published URLs are compiled in (API_URL / TRAJECTORY_URL /
+# ISAACBOT_AMR_API_URL; docker-compose*.yml set them). rmf-web is pinned:
+# RMF_WEB_REF is the jazzy branch commit the jazzy-nightly images were built from; bump it on
+# purpose and re-check the ISAACBOT TASK dialog (it uses the framework's hooks).
+#
+# Follows rmf-web's .github/demo-dashboard/Dockerfile.
+
+FROM docker.io/library/node:22-bookworm AS build
+# api-server is a dev dependency of rmf-dashboard-framework and installs a Python venv.
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-venv \
+    && rm -rf /var/lib/apt/lists/*
+ARG PNPM_VERSION=10.34.6
+RUN npm install -g pnpm@${PNPM_VERSION}
+
+ARG RMF_WEB_REF=85a34c3ec6481796d7c0eba745d9221055121656
+RUN mkdir -p /ws \
+    && curl -fsSL https://github.com/open-rmf/rmf-web/archive/${RMF_WEB_REF}.tar.gz \
+        | tar xz -C /ws --strip-components=1
+WORKDIR /ws
+# The sources are pinned, so let every dependency run its install scripts (pnpm 10 asks).
+ENV npm_config_dangerously_allow_all_builds=true
+RUN pnpm install --frozen-lockfile --filter rmf-dashboard-framework...
+
+WORKDIR /ws/packages/rmf-dashboard-framework
+# The framework's dependencies (api-client, rmf-models) first, as its build:example does.
+RUN pnpm run --filter '{.}^...' build
+
+COPY dashboard examples/isaacbot
+# vitest reads examples/isaacbot/vite.config.ts from its root.
+RUN pnpm exec vitest run --root examples/isaacbot \
+    && pnpm exec tsc -p tsconfig.app.json
+
+ARG API_URL=http://localhost:8010
+ARG TRAJECTORY_URL=http://localhost:8006
+ARG ISAACBOT_AMR_API_URL=http://localhost:8030
+RUN VITE_RMF_API_URL=${API_URL} VITE_RMF_TRAJECTORY_URL=${TRAJECTORY_URL} \
+    VITE_ISAACBOT_AMR_API_URL=${ISAACBOT_AMR_API_URL} \
+    pnpm exec vite -c examples/isaacbot/vite.config.ts build examples/isaacbot
+
+FROM docker.io/library/node:22-bookworm-slim
+RUN npm install -g serve@14
+COPY --from=build /ws/packages/rmf-dashboard-framework/examples/isaacbot/dist /opt/dashboard
+EXPOSE 3000
+ENTRYPOINT ["serve", "-sn", "/opt/dashboard"]
