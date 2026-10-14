@@ -21,7 +21,7 @@ ROS distros never share a graph.
  │ schedule visualizer (:8006) · isaacbot_amr_rmf_fleet_adapter (EasyFullControl + paho)   │
  │ mosquitto (host :1884)                                                           │
  └──────────────────────────────┬──────────────────────────────────────────────────┘
-      MQTT uagv/v2/MechatronicsAcademy/ardennes/{order, instantActions ↓ · state, connection, visualization ↑}
+      MQTT uagv/v2/IsaacBot/ardennes/{order, instantActions ↓ · state, connection, visualization ↑}
  Host (Lyrical, rmw_zenoh)      ▼
    isaacbot_amr_vda5050 connector → isaacbot_amr_mission_manager → Nav 2 → Gazebo (isaacbot_amr_gazebo)
 ```
@@ -33,7 +33,7 @@ ROS distros never share a graph.
 | `isaacbot_amr_rmf_fleet_adapter` | EasyFullControl fleet adapter. `domain/` holds the VDA 5050 messages, the state parsing and the command tracker. `application/` holds `RobotSession`. `infrastructure/` holds the paho link and the RMF binding. `presentation/` is the entry point. Only `infrastructure/` and `presentation/` import RMF, ROS or paho, and `scripts/check_domain_purity.sh` enforces it. |
 | `isaacbot_amr_rmf_maps` | One RMF site per directory in `maps/<site>/`: a floor plan and a building whose level is named `<site>`. `isaacbot_amr_world` is the Gazebo world (9 waypoints such as `ardennes_charger` and `north`, 11 two-way lanes, generated from `isaacbot_amr_world.sdf`). Real sites are imported from the isaacbot's saved maps. Nav graphs are generated at build time. `scripts/building_writer.py` and `scripts/isaacbot_amr_map_import.py` hold the shared code. |
 | `isaacbot_amr_rmf_bringup` | `isaacbot_amr_rmf.launch.xml` (RMF core and the adapter; `site:=<site>`) and `config/fleet_<site>.yaml` (RMF fleet config plus the adapter's `vda5050` section). |
-| `dashboard/` | Our rmf-web dashboard app: Mechatronics Academy branding, the **ISAACBOT TASK** dialog (`tasks/`) and the **Isaacbot** window (`isaacbot/`: drive mode, in or out of the fleet). See [Dashboard](#dashboard). |
+| `dashboard/` | Our rmf-web dashboard app: IsaacBot branding, the **ISAACBOT TASK** dialog (`tasks/`) and the **Isaacbot** window (`isaacbot/`: drive mode, in or out of the fleet). See [Dashboard](#dashboard). |
 | `docker/` | `Dockerfile.rmf` (Jazzy, RMF debs, builds and tests the packages), `docker-compose.yml` (mosquitto, rmf, rmf-web api-server and dashboard), broker and api-server configs. `Dockerfile.dashboard` builds `dashboard/` inside a pinned rmf-web checkout. |
 | `scripts/start_sim_isaacbot.sh` | Starts the simulated isaacbot's side in one terminal: Nav 2, drive mode, mission manager and the VDA 5050 connector on `:1884`. It then sets the drive mode to AUTOMATIC. `--localization indoor` behaves like the real isaacbot. |
 | `site_manager/` | The RMF sites page (<http://localhost:8020>, compose service `site-manager`): lists the maps saved on the isaacbot, imports them as sites into the `rmf-sites` volume, and activates one. `docker/run_rmf.sh` runs RMF for the active site and restarts it on a switch. |
@@ -116,20 +116,20 @@ positions.
 Terminal 1, Gazebo:
 
 ```bash
-~/ros2_ws/rover_a1/src/isaacbot_amr_ros/isaacbot_amr_gazebo/scripts/isaacbot_amr_sim.sh
+~/ros2_ws/ardennes/src/isaacbot_amr_ros/isaacbot_amr_gazebo/scripts/isaacbot_amr_sim.sh
 ```
 
 Terminal 2, RMF (Docker Desktop):
 
 ```bash
-cd ~/ros2_ws/rover_a1/src/isaacbot_amr_rmf
+cd ~/ros2_ws/ardennes/src/isaacbot_amr_rmf
 docker compose -f docker/docker-compose.yml up --build
 ```
 
 Terminal 3, the isaacbot stack:
 
 ```bash
-~/ros2_ws/rover_a1/src/isaacbot_amr_rmf/scripts/start_sim_isaacbot.sh
+~/ros2_ws/ardennes/src/isaacbot_amr_rmf/scripts/start_sim_isaacbot.sh
 ```
 
 Then:
@@ -169,7 +169,7 @@ port. To pick another port, run
 ## Real isaacbot
 
 RMF runs on the laptop. It talks to the isaacbot's own broker, `192.168.1.201:1883`, which the
-isaacbot's `rover-a1-vda5050` container runs. The isaacbot localizes indoors on a map saved with the
+isaacbot's `ardennes-vda5050` container runs. The isaacbot localizes indoors on a map saved with the
 drive UI, and that map becomes the RMF site.
 
 1. **Deploy.** Push the VDA 5050 and drive-mode work (isaacbot_amr_vda5050 `master`, isaacbot_amr_orchestrator,
@@ -277,7 +277,7 @@ while the laptop is off. Every port is published on the WireGuard address only.
 
 | Port on 10.8.0.1 | Service |
 |---|---|
-| 1883 | Mosquitto, with logins: `rmf` (this stack) and `ardennes` (only its own `uagv/v2/MechatronicsAcademy/ardennes/#`) |
+| 1883 | Mosquitto, with logins: `rmf` (this stack) and `ardennes` (only its own `uagv/v2/IsaacBot/ardennes/#`) |
 | 3000 | Dashboard |
 | 8010 | api-server |
 | 8006 | Trajectory websocket (dashboard map) |
@@ -302,7 +302,7 @@ while the laptop is off. Every port is published on the WireGuard address only.
 - points RMF at that broker for every site, logging in with `RMF_BROKER_USERNAME` /
   `RMF_BROKER_PASSWORD`.
 
-**On the isaacbot**, set these balenaCloud variables on `rover-a1-vda5050`. The password comes from
+**On the isaacbot**, set these balenaCloud variables on `ardennes-vda5050`. The password comes from
 `docker/rmf-server.sh isaacbot-password`.
 
 | Variable | Value |

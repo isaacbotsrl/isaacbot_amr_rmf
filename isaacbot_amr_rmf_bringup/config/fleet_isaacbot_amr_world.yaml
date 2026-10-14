@@ -74,7 +74,7 @@ vda5050:
   # The isaacbot's connector (isaacbot_amr_vda5050_bringup/config/connector.yaml).
   version: "2.0.0"
   interface_name: "uagv"
-  manufacturer: "MechatronicsAcademy"
+  manufacturer: "IsaacBot"
   broker:
     # Compose service name; the host-side connector reaches the same broker on localhost:1884.
     # The fleet_adapter --broker-host/--broker-port arguments override these.

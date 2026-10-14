@@ -1,4 +1,4 @@
-# Copyright 2026 Mechatronics Academy
+# Copyright 2026 IsaacBot
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -23,18 +23,18 @@ from isaacbot_amr_rmf_fleet_adapter.domain.vda_messages import (
     cancel_order_action, HeaderCounter, instant_actions_body, NavigationOrder,
     set_drive_mode_action, timestamp, with_header)
 
-IDENTITY = VdaIdentity('uagv', 'MechatronicsAcademy', 'ardennes')
+IDENTITY = VdaIdentity('uagv', 'IsaacBot', 'ardennes')
 
 
 def test_topics_follow_interface_major_manufacturer_serial():
     # Same prefix as isaacbot_amr_vda5050_bringup/config/connector.yaml.
-    assert IDENTITY.topic('order') == 'uagv/v2/MechatronicsAcademy/ardennes/order'
+    assert IDENTITY.topic('order') == 'uagv/v2/IsaacBot/ardennes/order'
 
 
 @pytest.mark.parametrize('bad', ['', 'a/b', 'a+b', 'a#', '$sys'])
 def test_identity_rejects_invalid_topic_levels(bad):
     with pytest.raises(DomainError):
-        VdaIdentity('uagv', 'MechatronicsAcademy', bad)
+        VdaIdentity('uagv', 'IsaacBot', bad)
 
 
 def test_pose_wraps_theta_and_rejects_nan():
@@ -59,7 +59,7 @@ def test_header_carries_identity_and_version():
     message = with_header(IDENTITY, 7, now, {'orderId': 'o'})
     assert message == {
         'headerId': 7, 'timestamp': '2026-09-29T00:00:00.000Z', 'version': '2.0.0',
-        'manufacturer': 'MechatronicsAcademy', 'serialNumber': 'ardennes', 'orderId': 'o'}
+        'manufacturer': 'IsaacBot', 'serialNumber': 'ardennes', 'orderId': 'o'}
 
 
 def test_navigation_order_is_start_edge_goal_all_released():

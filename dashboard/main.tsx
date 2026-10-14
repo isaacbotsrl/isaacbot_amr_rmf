@@ -1,4 +1,4 @@
-// Copyright 2026 Mechatronics Academy
+// Copyright 2026 IsaacBot
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
 // limitations under the License.
 //
 // Derived from open-rmf/rmf-web packages/rmf-dashboard-framework/examples/demo/main.tsx
-// (Apache-2.0) at 85a34c3ec6481796d7c0eba745d9221055121656; modified by Mechatronics Academy
+// (Apache-2.0) at 85a34c3ec6481796d7c0eba745d9221055121656; modified by IsaacBot
 // as described below.
 
 /*

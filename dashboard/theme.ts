@@ -1,4 +1,4 @@
-// Copyright 2026 Mechatronics Academy
+// Copyright 2026 IsaacBot
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-/* Mechatronics Academy orange (from the former logo) on a near-black app bar. */
+/* IsaacBot orange (from the former logo) on a near-black app bar. */
 import { createTheme } from '@mui/material';
 
 const ORANGE = '#ffaa00';
