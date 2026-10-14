@@ -41,7 +41,7 @@ class RmfRobot(RmfCommands):
         self._refused_map: Optional[str] = None
         # Wanted before the robot registered: applied once it has.
         self._in_fleet: Optional[bool] = None
-        self._commission_pending = False
+        self._pending = False            # commission/status waiting for RMF's handle
         self._offline = False
 
     def attach(self, session: RobotSession) -> None:
@@ -53,8 +53,9 @@ class RmfRobot(RmfCommands):
         execution.finished()
 
     def replan(self) -> None:
-        if self._update_handle is not None:
-            self._update_handle.more().replan()
+        more = self._more()
+        if more is not None:
+            more.replan()
 
     def set_in_fleet(self, in_fleet: bool) -> None:
         self._in_fleet = in_fleet
@@ -64,28 +65,47 @@ class RmfRobot(RmfCommands):
         self._offline = offline
         self._apply_status()
 
+    def _more(self):
+        """
+        RMF's handle for the robot's settings, or None while it does not exist yet.
+
+        add_robot finishes registering the robot asynchronously: right after it, more() is None
+        (and so is a fresh handle's commission). Settings made then are applied on a later
+        update (_pending): an out-of-fleet isaacbot must not keep RMF's default commission,
+        which accepts tasks.
+        """
+        if self._update_handle is None:
+            return None
+        return self._update_handle.more()
+
     def _apply_commission(self) -> None:
         if self._update_handle is None or self._in_fleet is None:
             return
-        more = self._update_handle.more()
+        more = self._more()
         # The binding has no Commission constructor: change the robot's current one.
-        commission = more.commission()
+        commission = more.commission() if more is not None else None
         if commission is None:
-            # add_robot finishes registering the robot asynchronously: right after it, the
-            # robot has no commission yet. Retry on the next update (an out-of-fleet isaacbot
-            # must not keep RMF's default, which accepts tasks).
-            self._commission_pending = True
+            self._pending = True
             return
         commission.accept_dispatched_tasks = self._in_fleet
         commission.accept_direct_tasks = self._in_fleet
         commission.perform_idle_behavior = self._in_fleet
         more.set_commission(commission)
-        self._commission_pending = False
 
     def _apply_status(self) -> None:
-        if self._update_handle is not None:
-            # None hands the status back to RMF (idle, working, ...).
-            self._update_handle.more().override_status('offline' if self._offline else None)
+        if self._update_handle is None:
+            return
+        more = self._more()
+        if more is None:
+            self._pending = True
+            return
+        # None hands the status back to RMF (idle, working, ...).
+        more.override_status('offline' if self._offline else None)
+
+    def _apply_pending(self) -> None:
+        self._pending = False
+        self._apply_commission()
+        self._apply_status()
 
     # --- update loop --------------------------------------------------------------------------
 
@@ -118,8 +138,8 @@ class RmfRobot(RmfCommands):
             self._log.info(f'[{self._name}] registered with RMF on {state.map_name} at '
                            f'({state.position[0]:.2f}, {state.position[1]:.2f})')
             return
-        if self._commission_pending:
-            self._apply_commission()
+        if self._pending:
+            self._apply_pending()
         execution = self._session.execution
         activity = execution.identifier if execution is not None else None
         self._update_handle.update(rmf_state, activity)

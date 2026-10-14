@@ -42,12 +42,15 @@ class Commission:
 
 class More:
     def __init__(self):
-        self.commission_ready = False        # RMF finishes add_robot asynchronously
         self.applied = None
         self.status = 'unset'
+        self.replans = 0
 
     def commission(self):
-        return Commission() if self.commission_ready else None
+        return Commission()
+
+    def replan(self):
+        self.replans += 1
 
     def set_commission(self, commission):
         self.applied = commission
@@ -59,10 +62,11 @@ class More:
 class Handle:
     def __init__(self):
         self._more = More()
+        self.ready = False                   # RMF finishes add_robot asynchronously
         self.updates = 0
 
     def more(self):
-        return self._more
+        return self._more if self.ready else None
 
     def update(self, state, activity):
         self.updates += 1
@@ -103,14 +107,16 @@ def test_commission_is_applied_once_rmf_has_registered_the_robot(monkeypatch):
     robot.attach(Session())
     robot.set_in_fleet(False)                # MANUAL: RMF must not give it tasks
 
-    robot.update()                           # registers; the commission does not exist yet
-    more = fleet.handle.more()
-    assert more.applied is None
-    assert more.status is None               # status still applied (no exception)
-    assert any('registered with RMF' in line for line in log.lines)
+    robot.update()                           # registers; RMF's more() does not exist yet
+    more = fleet.handle._more
+    assert more.applied is None and more.status == 'unset'
+    assert any('registered with RMF' in line for line in log.lines)   # no exception
+    robot.replan()                           # nothing to replan on yet: no exception
+    robot.set_offline(True)
 
-    more.commission_ready = True
+    fleet.handle.ready = True
     robot.update()                           # retried on the next update
+    assert more.status == 'offline'
     assert more.applied is not None
     assert not more.applied.accept_dispatched_tasks and not more.applied.accept_direct_tasks
     assert not more.applied.perform_idle_behavior
