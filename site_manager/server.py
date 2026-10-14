@@ -502,7 +502,9 @@ def ensure_key() -> None:
 
 # The only static files served, besides the two pages: no path from a request reaches the disk.
 STATIC = {'/isaacbot-mark-black.svg': 'image/svg+xml', '/isaacbot-mark-white.svg': 'image/svg+xml',
-          '/common.js': 'text/javascript; charset=utf-8', '/common.css': 'text/css; charset=utf-8'}
+          '/common.js': 'text/javascript; charset=utf-8', '/common.css': 'text/css; charset=utf-8',
+          '/isaacbot-lockup-black-bold.svg': 'image/svg+xml',
+          '/isaacbot-lockup-white.svg': 'image/svg+xml'}
 ROBOT_PATH = re.compile(r'/api/robots/([^/]+)')
 
 

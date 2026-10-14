@@ -21,22 +21,20 @@
 <title>RMF robots</title>
 <link rel="icon" type="image/svg+xml" href="/isaacbot-mark-black.svg" media="(prefers-color-scheme: light)">
 <link rel="icon" type="image/svg+xml" href="/isaacbot-mark-white.svg" media="(prefers-color-scheme: dark)">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap">
 <link rel="stylesheet" href="/common.css">
 </head>
 <body>
-<header>
-  <picture class="logo">
-    <source media="(prefers-color-scheme: dark)" srcset="/isaacbot-mark-white.svg">
-    <img src="/isaacbot-mark-black.svg" alt="IsaacBot">
-  </picture>
-  <h1>RMF robots</h1>
-  <span class="status" id="rmf"><span class="dot"></span><span>…</span></span>
-  <span class="spacer"></span>
-  <a id="dashboard" href="#" target="_blank" rel="noopener">Open the RMF dashboard ↗</a>
-</header>
+<div id="site-header"></div>
 <main>
+  <div class="page-title">
+    <h1>Robots</h1>
+    <span class="spacer"></span>
+    <span class="status rmf-status" id="rmf"><span class="dot"></span><span>…</span></span>
+  </div>
   <section>
-    <h2>Robots</h2>
     <p class="muted" style="margin-top:0">The fleet's isaacbots. Open one for its maps and the RMF
       sites. Each has its own VDA 5050 identity (topics
       <code>uagv/v2/&lt;manufacturer&gt;/&lt;serial&gt;/…</code>) and a broker login that may only use
@@ -54,10 +52,11 @@
     <div id="robot-result"></div>
   </section>
 </main>
+<div id="site-footer"></div>
 
 <script src="/common.js"></script>
 <script>
-$('dashboard').href = `http://${location.hostname}:3000`;
+siteChrome();
 
 function renderRobots(data) {
   setHtml('robots', !data.robots.length ? '<p class="muted">No robots.</p>' :

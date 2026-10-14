@@ -111,3 +111,36 @@ function onButtons(handlers) {
     } catch (e) { alert(e.message); b.disabled = false; }
   });
 }
+
+// The IsaacBot website's header and footer (http://<server>/), on every page: the lockup, one
+// call to action (the RMF dashboard), and the dark footer. crumb: an optional link left of the
+// button, e.g. back to the robots.
+function siteChrome(crumb) {
+  const host = location.hostname;
+  const chevron = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3l5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.8"></path></svg>';
+  $('site-header').outerHTML = `<header class="site-header" id="top"><div class="container">
+      <a class="logo" href="/" aria-label="IsaacBot robots">
+        <picture><source media="(prefers-color-scheme: dark)" srcset="/isaacbot-lockup-white.svg">
+          <img src="/isaacbot-lockup-black-bold.svg" alt="IsaacBot" width="180" height="25"></picture></a>
+      <span class="spacer"></span>
+      ${crumb ? `<a class="crumb" href="${esc(crumb.href)}">${esc(crumb.text)}</a>` : ''}
+      <a class="btn" href="http://${host}:3000" target="_blank" rel="noopener">
+        <span>Open RMF dashboard</span><span class="btn-chevrons">${chevron}${chevron}</span></a>
+    </div></header>`;
+  $('site-footer').outerHTML = `<footer class="site-footer">
+      <div class="container footer-grid">
+        <div class="footer-brand"><a href="/" aria-label="IsaacBot robots">
+            <img src="/isaacbot-lockup-white.svg" alt="IsaacBot" width="200" height="44" loading="lazy"></a>
+          <p>From a falling apple to autonomous logistics.</p></div>
+        <div class="footer-col"><h4>Navigate</h4><ul>
+          <li><a href="/">Robots</a></li>
+          <li><a href="http://${host}:3000" target="_blank" rel="noopener">RMF dashboard</a></li>
+          <li><a href="http://${host}/" target="_blank" rel="noopener">IsaacBot website</a></li></ul></div>
+        <div class="footer-col"><h4>Contact</h4><ul>
+          <li><a href="mailto:potlogradu@gmail.com">potlogradu@gmail.com</a></li></ul></div>
+      </div>
+      <div class="container footer-bottom"><span>© ${new Date().getFullYear()} IsaacBot. All rights reserved.</span>
+        <a href="#top">Back to top ↑</a></div>
+      <img class="footer-wordmark" src="/isaacbot-lockup-white.svg" alt="" aria-hidden="true" loading="lazy">
+    </footer>`;
+}

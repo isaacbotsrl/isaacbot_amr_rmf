@@ -21,22 +21,20 @@
 <title>Robot</title>
 <link rel="icon" type="image/svg+xml" href="/isaacbot-mark-black.svg" media="(prefers-color-scheme: light)">
 <link rel="icon" type="image/svg+xml" href="/isaacbot-mark-white.svg" media="(prefers-color-scheme: dark)">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap">
 <link rel="stylesheet" href="/common.css">
 </head>
 <body>
-<header>
-  <picture class="logo">
-    <source media="(prefers-color-scheme: dark)" srcset="/isaacbot-mark-white.svg">
-    <img src="/isaacbot-mark-black.svg" alt="IsaacBot">
-  </picture>
-  <a class="back" href="/">← Robots</a>
-  <h1 id="title">…</h1>
-  <span id="live"></span>
-  <span class="spacer"></span>
-  <span class="status" id="rmf"><span class="dot"></span><span>…</span></span>
-  <a id="dashboard" href="#" target="_blank" rel="noopener">RMF dashboard ↗</a>
-</header>
+<div id="site-header"></div>
 <main>
+  <div class="page-title">
+    <h1 id="title">…</h1>
+    <span id="live"></span>
+    <span class="spacer"></span>
+    <span class="status rmf-status" id="rmf"><span class="dot"></span><span>…</span></span>
+  </div>
   <section>
     <h2>Robot</h2>
     <div id="facts">Loading…</div>
@@ -69,12 +67,13 @@
     <div class="sites" id="sites"></div>
   </section>
 </main>
+<div id="site-footer"></div>
 
 <script src="/common.js"></script>
 <script>
 const NAME = decodeURIComponent(location.pathname.split('/')[2] || '');
 const ROBOT = `/api/robots/${encodeURIComponent(NAME)}`;
-$('dashboard').href = `http://${location.hostname}:3000`;
+siteChrome({href: '/', text: '← All robots'});
 $('title').textContent = NAME;
 document.title = `${NAME} · RMF robots`;
 let robot = null, settingsKey = '';

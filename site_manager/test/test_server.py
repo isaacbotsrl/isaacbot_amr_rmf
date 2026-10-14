@@ -173,6 +173,9 @@ def test_http_end_to_end(http):
     code, kind, body = request(f'{http}/common.js')
     assert code == 200 and kind.startswith('text/javascript') and b'function api' in body
     assert request(f'{http}/common.css')[0] == 200
+    for logo in ('isaacbot-lockup-black-bold.svg', 'isaacbot-lockup-white.svg'):
+        code, kind, body = request(f'{http}/{logo}')
+        assert code == 200 and kind == 'image/svg+xml' and body.startswith(b'<svg')
 
     code, _, body = request(f'{http}/api/robots/ardennes')
     robot = json.loads(body)
