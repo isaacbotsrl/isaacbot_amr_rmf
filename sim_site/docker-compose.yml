@@ -1,0 +1,42 @@
+# Copyright 2026 IsaacBot
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# A simulated second site: a WireGuard peer standing in for its RUTX11 (10.8.0.6), and a fake
+# isaacbot behind it that talks VDA 5050 to the server's broker. See README.md.
+#
+#   docker compose -f sim_site/docker-compose.yml up -d --build
+#   docker compose -f sim_site/docker-compose.yml logs -f
+name: isaacbot-sim-site
+
+services:
+  rutx11-sim:
+    build: .
+    image: isaacbot-sim-site
+    command: [sh, /app/rutx11-sim.sh]
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ./secrets/wg0.conf:/secrets/wg0.conf:ro
+    restart: unless-stopped
+
+  robot:
+    image: isaacbot-sim-site
+    depends_on:
+      - rutx11-sim
+    # Same network namespace as rutx11-sim: the robot's traffic leaves through its tunnel.
+    network_mode: service:rutx11-sim
+    command: [python3, /app/fake_vda_robot.py]
+    env_file:
+      - ./secrets/robot.env
+    restart: unless-stopped

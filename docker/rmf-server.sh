@@ -16,10 +16,14 @@
 # The RMF stack on the WireGuard server (docker-compose.server.yml).
 #
 #   rmf-server.sh init                 generate server/.env and the broker logins (once)
-#   rmf-server.sh isaacbot-password       print the ardennes broker password (for balena)
+#   rmf-server.sh isaacbot-password    print Ardennes's initial broker password (until the sites
+#                                      page rotates it)
+#   rmf-server.sh site-password        print the sites page (:8020) password; adds one to an
+#                                      older server/.env (then: up -d site-manager)
 #   rmf-server.sh <compose args...>    e.g. up -d --build | ps | logs -f rmf | down
 #
-# server/ holds the secrets and is not tracked by git.
+# server/ holds the secrets and is not tracked by git. Robots after the first are added on the
+# sites page, which shows each new robot's broker password once.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SERVER="$HERE/server"
@@ -47,6 +51,7 @@ init() {
 RMF_BIND_IP=10.8.0.1
 RMF_MQTT_PASSWORD=$rmf_pw
 ISAACBOT_AMR_MQTT_PASSWORD=$isaacbot_amr_pw
+SITE_MANAGER_PASSWORD=$(openssl rand -hex 12)
 EOF
     # mosquitto runs as uid 1883 and wants its password file private.
     docker run --rm -e RMF_PW="$rmf_pw" -e ISAACBOT_AMR_PW="$isaacbot_amr_pw" -v "$SERVER:/out" \
@@ -59,9 +64,20 @@ EOF
     echo "Wrote $ENV_FILE and the broker logins rmf, ardennes."
 }
 
+# The sites page password; generated into server/.env when an older init did not make one.
+site_password() {
+    [ -s "$ENV_FILE" ] || { echo "no $ENV_FILE: run '$0 init' first" >&2; exit 1; }
+    if ! grep -q '^SITE_MANAGER_PASSWORD=.' "$ENV_FILE"; then
+        echo "SITE_MANAGER_PASSWORD=$(openssl rand -hex 12)" >> "$ENV_FILE"
+        echo "Added SITE_MANAGER_PASSWORD to $ENV_FILE; apply it: $0 up -d site-manager" >&2
+    fi
+    sed -n 's/^SITE_MANAGER_PASSWORD=//p' "$ENV_FILE"
+}
+
 case "${1:-}" in
     init) shift; init "$@" ;;
     isaacbot-password) sed -n 's/^ISAACBOT_AMR_MQTT_PASSWORD=//p' "$ENV_FILE" ;;
-    "") sed -n '2,8s/^# \{0,1\}//p' "$0"; exit 1 ;;
+    site-password) site_password ;;
+    "") sed -n '/^# The RMF stack/,/^set -euo/{/^set/!s/^# \{0,1\}//p}' "$0"; exit 1 ;;
     *) compose "$@" ;;
 esac

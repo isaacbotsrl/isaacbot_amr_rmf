@@ -112,6 +112,7 @@ services:
     environment:
       ISAACBOT_AMR_SSH: ${ISAACBOT_AMR_SSH:-root@192.168.1.201}
       ISAACBOT_AMR_SSH_PORT: ${ISAACBOT_AMR_SSH_PORT:-24}
+      RMF_SITE: ${RMF_SITE:-isaacbot_amr_world}
     volumes:
       - rmf-sites:/sites
       - site-manager-ssh:/root/.ssh

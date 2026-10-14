@@ -22,19 +22,23 @@
 # address), never on the server's LAN. `!override` replaces the base file's ports instead of
 # adding to them.
 #
-# The broker requires a login (mosquitto.server.conf + mosquitto.acl):
+# The broker requires a login (mosquitto.server.conf). The logins and ACL live in the
+# broker-auth volume, seeded on first start from server/mosquitto.passwd and mosquitto.acl:
 #   rmf       this stack's fleet adapter, all of uagv/#
-#   ardennes  the isaacbot's VDA 5050 connector, only its own topics; on the isaacbot set
-#             ISAACBOT_AMR_VDA5050_LOCAL_BROKER=false, ISAACBOT_AMR_VDA5050_BROKER_HOST=<RMF_BIND_IP>,
-#             ISAACBOT_AMR_VDA5050_BROKER_USER=ardennes, ISAACBOT_AMR_VDA5050_BROKER_PASSWORD=<server/.env>,
-#             ISAACBOT_AMR_VDA5050_BROKER_TLS=false (WireGuard already encrypts the link)
+#   <robot>   one per isaacbot, only its own uagv/v2/<manufacturer>/<serial>/# (Ardennes: ardennes)
+# Robots are added and removed on the sites page (:8020, Robots), which writes the logins, the
+# ACL and robots.json; mosquitto-run.sh reloads the broker, run_rmf.sh restarts RMF. The page
+# shows the new robot's balena variables (password included) once.
 # RMF uses this broker for every site, whatever the site's fleet config names.
 services:
   mosquitto:
+    command: [sh, /mosquitto/run.sh]
     volumes: !override
       - ./mosquitto.server.conf:/mosquitto/config/mosquitto.conf:ro
-      - ./mosquitto.acl:/mosquitto/config/acl:ro
-      - ./server/mosquitto.passwd:/mosquitto/config/passwd:ro
+      - ./mosquitto-run.sh:/mosquitto/run.sh:ro
+      - ./mosquitto.acl:/mosquitto/seed/acl:ro
+      - ./server/mosquitto.passwd:/mosquitto/seed/passwd:ro
+      - broker-auth:/mosquitto/auth
       - mosquitto-data:/mosquitto/data
     ports: !override
       - "${RMF_BIND_IP:-10.8.0.1}:1883:1883"
@@ -70,9 +74,15 @@ services:
   site-manager:
     environment:
       ISAACBOT_AMR_BROKER: mosquitto:1883
+      BROKER_AUTH_DIR: /broker
+      ROBOT_BROKER: ${RMF_BIND_IP:-10.8.0.1}:1883
+      SITE_MANAGER_PASSWORD: ${SITE_MANAGER_PASSWORD:-}
+    volumes:
+      - broker-auth:/broker
     ports: !override
       - "${RMF_BIND_IP:-10.8.0.1}:8020:8020"
 
 volumes:
   mosquitto-data:
   api-server-db:
+  broker-auth:

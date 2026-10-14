@@ -277,7 +277,7 @@ while the laptop is off. Every port is published on the WireGuard address only.
 
 | Port on 10.8.0.1 | Service |
 |---|---|
-| 1883 | Mosquitto, with logins: `rmf` (this stack) and `ardennes` (only its own `uagv/v2/IsaacBot/ardennis-3420987-k/#`) |
+| 1883 | Mosquitto with logins: `rmf` (this stack, all of `uagv/#`) and one login per isaacbot, limited to its own `uagv/v2/<manufacturer>/<serial>/#` (Ardennes: `ardennes`, `uagv/v2/IsaacBot/ardennis-3420987-k/#`) |
 | 3000 | Dashboard |
 | 8010 | api-server |
 | 8006 | Trajectory websocket (dashboard map) |
@@ -290,7 +290,7 @@ while the laptop is off. Every port is published on the WireGuard address only.
    to 10.8.0.1 fail if `wg0` isn't up yet.
 2. Check out this repo and run:
    ```bash
-   docker/rmf-server.sh init            # docker/server/.env + broker logins (git-ignored)
+   docker/rmf-server.sh init            # docker/server/.env, broker logins, sites page password (git-ignored)
    docker/rmf-server.sh up -d --build
    docker/rmf-server.sh exec site-manager isaacbot-authorize   # once per isaacbot release
    ```
@@ -302,8 +302,41 @@ while the laptop is off. Every port is published on the WireGuard address only.
 - points RMF at that broker for every site, logging in with `RMF_BROKER_USERNAME` /
   `RMF_BROKER_PASSWORD`.
 
-**On the isaacbot**, set these balenaCloud variables on `ardennes-vda5050`. The password comes from
-`docker/rmf-server.sh isaacbot-password`.
+### Robots
+
+The sites page (`:8020`, **Robots**) manages the fleet's isaacbots. It keeps one list,
+`robots.json` in the rmf-sites volume, and both RMF and the broker follow it:
+
+- **Add** creates the robot's broker login, which may only use its own topics, and its ACL entry,
+  and adds it to RMF's fleet config with its charger. It shows the balena variables, password
+  included, **once**.
+- **New password** rotates the robot's login. The robot is offline until its balena variable has
+  the new password.
+- **Remove** drops the robot's login, its ACL entry and its RMF entry. The last robot cannot be
+  removed.
+
+Behind it:
+- The logins and ACL live in the `broker-auth` volume. On first start they are seeded from
+  `server/mosquitto.passwd` and `mosquitto.acl`, so `rmf` and `ardennes` keep their passwords.
+- `docker/mosquitto-run.sh` reloads Mosquitto (SIGHUP) when the page changes them, without
+  dropping clients.
+- `docker/run_rmf.sh` merges `robots.json` into the active site's fleet config, and restarts RMF
+  when the list changes (about 10 s, all robots briefly offline in RMF).
+
+The page creates broker credentials, so it asks for a password when `SITE_MANAGER_PASSWORD` is
+set. `rmf-server.sh init` generates one, and `rmf-server.sh site-password` prints it, adding
+one to an older `server/.env` first (then `rmf-server.sh up -d site-manager`).
+
+To try a second robot before one exists, use `sim_site/`. It is a WireGuard peer at 10.8.0.6
+with a fake VDA 5050 robot behind it; see [sim_site/README.md](sim_site/README.md).
+
+A second site's router needs its own WireGuard peer. If the server must reach that site's LAN
+(the sites page reading maps over SSH), the LAN also needs its own subnet, because the server
+routes 192.168.1.0/24 to Ardennes's RUTX11.
+
+**On the isaacbot**, set these balenaCloud variables on `ardennes-vda5050`. For a robot added on
+the sites page, the page shows them. Ardennes's initial password comes from
+`docker/rmf-server.sh isaacbot-password` until the page rotates it.
 
 | Variable | Value |
 |---|---|
@@ -326,7 +359,8 @@ colcon build --packages-select isaacbot_amr_rmf_fleet_adapter --cmake-args -DBUI
 colcon test --packages-select isaacbot_amr_rmf_fleet_adapter && colcon test-result --verbose
 (cd isaacbot_amr_rmf_maps && python3 -m pytest test)  # map importer, map sources, preview (colcon
                                                # needs RMF's building map tools for this one)
-python3 -m pytest site_manager/test            # the sites page's server and API
+python3 -m pytest site_manager/test            # the sites page's server, API and robots
+python3 -m pytest sim_site/test                # the fake VDA 5050 robot
 ```
 
 These unit tests run on the host without RMF. The image build runs them again under Jazzy. The

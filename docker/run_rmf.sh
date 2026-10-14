@@ -21,14 +21,20 @@
 #
 # The site is the name in $SITES_DIR/active (written by the site manager page), else $RMF_SITE,
 # else isaacbot_amr_world. An imported site lives in $SITES_DIR/<site>/ and wins over a built-in one in
-# isaacbot_amr_rmf_maps. RMF is restarted when the active name changes or the active imported site is
-# imported again. Status for the page: $SITES_DIR/rmf_status.json.
+# isaacbot_amr_rmf_maps. RMF is restarted when the active name changes, the active imported site is
+# imported again, or the robots change. Status for the page: $SITES_DIR/rmf_status.json.
+#
+# Robots: $SITES_DIR/robots.json (the site manager's Robots list) replaces the robots of the site's
+# fleet config; the merged config RMF runs is $SITES_DIR/.effective/fleet_<site>.yaml. Without
+# robots.json the site's fleet config runs as is.
 set -m
 
 SITES_DIR="${SITES_DIR:-/sites}"
 MAPS_SHARE="$(ros2 pkg prefix isaacbot_amr_rmf_maps)/share/isaacbot_amr_rmf_maps/maps"
 CONFIG_SHARE="$(ros2 pkg prefix isaacbot_amr_rmf_bringup)/share/isaacbot_amr_rmf_bringup/config"
 STATUS="$SITES_DIR/rmf_status.json"
+ROBOTS="$SITES_DIR/robots.json"
+ROBOTS_PY="${ROBOTS_PY:-/opt/site_manager/robots.py}"
 mkdir -p "$SITES_DIR"
 
 # ros2 launch refuses an empty 'name:=', so overrides are only passed when set.
@@ -62,11 +68,24 @@ resolve() {
     [ -f "$BUILDING" ] && [ -f "$NAV_GRAPH" ] && [ -f "$CONFIG" ]
 }
 
-# What a restart depends on: the requested name, and the imported version of it (if any).
+# What a restart depends on: the requested name, the imported version of it (if any), the robots.
 fingerprint() {
     local site
     site="$(requested_site)"
-    echo "$site $(stat -c %Y "$SITES_DIR/$site/$site.building.yaml" 2>/dev/null)"
+    echo "$site $(stat -c %Y "$SITES_DIR/$site/$site.building.yaml" 2>/dev/null)" \
+        "$(md5sum 2>/dev/null < "$ROBOTS")"
+}
+
+# CONFIG with robots.json's robots, when there is a robots.json; CONFIG itself otherwise.
+merge_robots() {
+    [ -f "$ROBOTS" ] || return 0
+    local merged="$SITES_DIR/.effective/fleet_$SITE.yaml"
+    if python3 "$ROBOTS_PY" merge "$CONFIG" "$ROBOTS" "$merged" "$BUILDING"; then
+        CONFIG="$merged"
+    else
+        ERROR="could not apply robots.json; running the site's own robots"
+        echo "run_rmf: $ERROR" >&2
+    fi
 }
 
 write_status() {  # state
@@ -106,7 +125,8 @@ while true; do
         SITE=isaacbot_amr_world
         resolve "$SITE"
     fi
-    echo "run_rmf: starting RMF on site $SITE"
+    merge_robots
+    echo "run_rmf: starting RMF on site $SITE ($CONFIG)"
     ros2 launch isaacbot_amr_rmf_bringup isaacbot_amr_rmf.launch.xml site:="$SITE" \
         building_file:="$BUILDING" nav_graph_file:="$NAV_GRAPH" config_file:="$CONFIG" \
         initial_map:="$SITE" "${OVERRIDES[@]}" "$@" &
@@ -117,7 +137,7 @@ while true; do
     while kill -0 "$LAUNCH_PID" 2> /dev/null; do
         sleep 2
         if [ "$(fingerprint)" != "$WANTED" ]; then
-            echo "run_rmf: site changed to $(requested_site); restarting RMF"
+            echo "run_rmf: site or robots changed (site $(requested_site)); restarting RMF"
             write_status restarting
             stop_rmf
             break

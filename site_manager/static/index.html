@@ -88,6 +88,12 @@
   .message.bad { background: color-mix(in srgb, var(--bad) 14%, transparent); }
   .legend span { display: inline-flex; align-items: center; gap: 5px; margin-right: 14px; font-size: 13px; }
   .legend i { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+  input[type=text] { font: inherit; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--line);
+                     background: var(--card); color: var(--text); }
+  .add-robot { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-end; margin-top: 14px;
+               padding-top: 14px; border-top: 1px solid var(--line); }
+  .add-robot label { display: grid; gap: 3px; font-size: 13px; color: var(--muted); }
+  td .actions { display: flex; gap: 6px; flex-wrap: wrap; }
   @media (max-width: 640px) { header { padding: 12px 16px; } td.places { max-width: 140px; } }
 </style>
 </head>
@@ -106,6 +112,22 @@
   <section id="access-card">
     <h2>Isaacbot</h2>
     <div id="access">Checking…</div>
+  </section>
+
+  <section>
+    <h2>Robots</h2>
+    <p class="muted" style="margin-top:0">The fleet's isaacbots. Each has its own VDA 5050 identity
+      (topics <code>uagv/v2/&lt;manufacturer&gt;/&lt;serial&gt;/…</code>) and a broker login that may
+      only use those topics. Adding or removing a robot restarts RMF (about 10 s).</p>
+    <div id="robots">Loading…</div>
+    <form id="add-robot" class="add-robot" autocomplete="off">
+      <label>RMF name <input type="text" id="robot-name" placeholder="ardennes_e" size="14" required></label>
+      <label>Serial number <input type="text" id="robot-serial" placeholder="ardennis-3420987-e" size="20" required></label>
+      <label>Manufacturer <input type="text" id="robot-manufacturer" value="IsaacBot" size="12" required></label>
+      <label>Charger <select id="robot-charger"><option value="">site charger</option></select></label>
+      <button class="primary" type="submit">Add robot</button>
+    </form>
+    <div id="robot-result"></div>
   </section>
 
   <section>
@@ -132,7 +154,7 @@
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-let status = null, accessHtml = '';
+let status = null, accessHtml = '', robotsHtml = '', chargerOptions = '';
 
 async function api(method, path, body) {
   const res = await fetch(path, {method, headers: {'Content-Type': 'application/json'},
@@ -243,6 +265,68 @@ async function refreshStatus() {
   }
 }
 
+function robotState(r) {
+  const live = r.live;
+  if (!live) return '<span class="status"><span class="dot"></span>not in RMF yet</span>';
+  const online = live.connection === 'ONLINE';
+  const cls = !online ? 'bad' : live.in_fleet === false || live.blocked_reason ? 'warn' : 'ok';
+  const parts = [online ? (live.operating_mode || 'online') : live.connection.toLowerCase()];
+  if (live.battery_soc !== null && live.battery_soc !== undefined) parts.push(`${Math.round(live.battery_soc * 100)} %`);
+  if (online && !live.localized) parts.push('not localized');
+  const why = live.blocked_reason ? `<div class="muted">${esc(live.blocked_reason)}</div>` : '';
+  return `<span class="status"><span class="dot ${cls}"></span>${esc(parts.join(' · '))}</span>${why}`;
+}
+
+function renderRobots(data) {
+  const html = !data.robots.length ? '<p class="muted">No robots.</p>' :
+    `<table><thead><tr><th>Robot</th><th>VDA 5050 identity</th><th>Broker login</th><th>Charger</th><th>State</th><th></th></tr></thead><tbody>` +
+    data.robots.map((r) => `<tr><td><b>${esc(r.name)}</b></td>
+        <td><code>${esc(r.manufacturer)} / ${esc(r.serial_number)}</code></td>
+        <td>${data.broker_auth ? `<code>${esc(r.broker_login)}</code>` : '<span class="muted">none (anonymous broker)</span>'}</td>
+        <td>${r.charger ? esc(r.charger) : `<span class="muted">site charger${data.site_charger ? ` (${esc(data.site_charger)})` : ''}</span>`}</td>
+        <td>${robotState(r)}</td>
+        <td><div class="actions">
+          ${data.broker_auth ? `<button data-robot-password="${esc(r.name)}">New password</button>` : ''}
+          <button class="danger" data-robot-delete="${esc(r.name)}" ${data.robots.length < 2 ? 'disabled title="The fleet needs at least one robot"' : ''}>Remove</button>
+        </div></td></tr>`).join('') + '</tbody></table>';
+  // Re-render only on change, as for the access card: keeps a text selection alive.
+  if (html !== robotsHtml) $('robots').innerHTML = robotsHtml = html;
+  const options = '<option value="">site charger</option>' +
+    data.waypoints.map((w) => `<option>${esc(w)}</option>`).join('');
+  if (options !== chargerOptions) $('robot-charger').innerHTML = chargerOptions = options;
+}
+
+async function refreshRobots() {
+  try {
+    renderRobots(await api('GET', '/api/robots'));
+  } catch (e) {
+    $('robots').innerHTML = robotsHtml = `<p class="warning">${esc(e.message)}</p>`;
+  }
+}
+
+function showCredentials(r, what) {
+  const vars = Object.entries(r.balena).map(([k, v]) => `${k}=${v}`).join('\n');
+  const once = r.password ? '<b>The password is shown only now</b>; ' : '';
+  $('robot-result').innerHTML = `<div class="message ok"><b>${esc(r.robot.name)}</b> ${what}.
+    ${once}set these balenaCloud device variables on the isaacbot (each change restarts its VDA 5050 container):
+    <div class="cmd"><pre>${esc(vars)}</pre><button data-copy>Copy</button></div></div>`;
+}
+
+async function addRobot() {
+  const body = {name: $('robot-name').value.trim(), serial_number: $('robot-serial').value.trim(),
+                manufacturer: $('robot-manufacturer').value.trim(), charger: $('robot-charger').value};
+  $('robot-result').innerHTML = '';
+  try {
+    showCredentials(await api('POST', '/api/robots', body), 'added; RMF restarts with it now');
+    $('robot-name').value = ''; $('robot-serial').value = '';
+    await refreshRobots();
+  } catch (e) {
+    $('robot-result').innerHTML = `<div class="message bad">Could not add <b>${esc(body.name)}</b>: ${esc(e.message)}</div>`;
+  }
+}
+
+$('add-robot').addEventListener('submit', (event) => { event.preventDefault(); addRobot(); });
+
 async function refreshMaps() {
   $('maps').textContent = 'Loading…';
   try {
@@ -298,11 +382,18 @@ document.addEventListener('click', async (event) => {
     else if (b.dataset.delete && confirm(`Delete the site ${b.dataset.delete}? The map on the isaacbot stays.`)) {
       await api('DELETE', `/api/sites/${encodeURIComponent(b.dataset.delete)}`); await refreshStatus();
     }
+    else if (b.dataset.robotPassword && confirm(`Give ${b.dataset.robotPassword} a new broker password? It is offline until its balena variable has the new one.`)) {
+      showCredentials(await api('POST', `/api/robots/${encodeURIComponent(b.dataset.robotPassword)}/password`), 'has a new password');
+    }
+    else if (b.dataset.robotDelete && confirm(`Remove ${b.dataset.robotDelete}? Its broker login stops working and RMF restarts without it.`)) {
+      await api('DELETE', `/api/robots/${encodeURIComponent(b.dataset.robotDelete)}`);
+      $('robot-result').innerHTML = ''; await refreshRobots();
+    }
   } catch (e) { alert(e.message); b.disabled = false; }
 });
 
-refreshStatus(); refreshMaps();
-setInterval(refreshStatus, 3000);
+refreshStatus(); refreshMaps(); refreshRobots();
+setInterval(() => { refreshStatus(); refreshRobots(); }, 3000);
 </script>
 </body>
 </html>

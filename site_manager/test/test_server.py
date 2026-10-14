@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import base64
 from http.server import ThreadingHTTPServer
 import json
 import os
@@ -182,3 +183,145 @@ def test_http_end_to_end(http):
     assert request(f'{http}/server.py')[0] == 404
     assert request(f'{http}/sites/..%2F..%2Fetc/preview.png')[0] == 404
     assert request(f'{http}/api/nothing')[0] == 404
+
+
+# --- robots ---------------------------------------------------------------------------------------
+
+LIVE = {'robots': [{'name': 'ardennes', 'connection': 'ONLINE', 'operating_mode': 'AUTOMATIC',
+                    'in_fleet': True, 'blocked_reason': None, 'localized': True,
+                    'battery_soc': 0.8}]}
+
+
+@pytest.fixture
+def robot_manager(manager, tmp_path):
+    auth_dir = tmp_path / 'broker'
+    auth_dir.mkdir()
+    (auth_dir / 'passwd').write_text('rmf:$7$101$aaa$bbb\nardennes:$7$101$ccc$ddd\n')
+    manager.broker_auth = server.fleet_robots.BrokerAuth(str(auth_dir), owner_uid=os.getuid())
+    manager.robot_broker = ('10.8.0.1', 1883)
+    manager.fleet_state = lambda: LIVE
+    return manager
+
+
+def test_robots_are_seeded_from_the_fleet_template(robot_manager):
+    data = robot_manager.robots()
+    assert [r['name'] for r in data['robots']] == ['ardennes']
+    ardennes = data['robots'][0]
+    assert ardennes['serial_number'] == 'ardennis-3420987-k' and ardennes['broker_login'] == 'ardennes'
+    assert ardennes['live']['battery_soc'] == 0.8
+    assert data['broker_auth'] and data['broker'] == '10.8.0.1:1883'
+    assert data['site'] == 'isaacbot_amr_world' and 'ardennes_charger' in data['waypoints']
+
+
+def test_add_rotate_and_delete_a_robot(robot_manager):
+    auth = robot_manager.broker_auth
+    added = robot_manager.add_robot({'name': 'ardennes_e', 'serial_number': 'ardennis-3420987-e'})
+    password = added['password']
+    assert len(password) == 32 and added['robot']['login'] == 'ardennes_e'
+    variables = added['balena']
+    assert variables['ISAACBOT_AMR_VDA5050_BROKER_HOST'] == '10.8.0.1'
+    assert variables['ISAACBOT_AMR_VDA5050_BROKER_USER'] == 'ardennes_e'
+    assert variables['ISAACBOT_AMR_VDA5050_BROKER_PASSWORD'] == password
+    assert variables['ISAACBOT_AMR_VDA5050_SERIAL_NUMBER'] == 'ardennis-3420987-e'
+    assert variables['ISAACBOT_AMR_VDA5050_MANUFACTURER'] == 'IsaacBot'
+
+    line = next(li for li in open(auth.passwd_path).read().splitlines() if li.startswith('ardennes_e:'))
+    assert server.fleet_robots.check_password(password, line.split(':', 1)[1])
+    assert auth.logins() == ['rmf', 'ardennes', 'ardennes_e']      # existing logins untouched
+    acl = open(auth.acl_path).read()
+    assert 'user ardennes_e\ntopic readwrite uagv/v2/IsaacBot/ardennis-3420987-e/#' in acl
+    assert 'user ardennes\ntopic readwrite uagv/v2/IsaacBot/ardennis-3420987-k/#' in acl
+    assert [r.name for r in server.fleet_robots.load(robot_manager.robots_path)] == [
+        'ardennes', 'ardennes_e']
+
+    rotated = robot_manager.rotate_password('ardennes_e')['password']
+    assert rotated != password and auth.logins() == ['rmf', 'ardennes', 'ardennes_e']
+
+    assert robot_manager.delete_robot('ardennes_e') == {'deleted': 'ardennes_e'}
+    assert auth.logins() == ['rmf', 'ardennes'] and 'ardennes_e' not in open(auth.acl_path).read()
+    with pytest.raises(server.RequestError, match='at least one robot'):
+        robot_manager.delete_robot('ardennes')
+
+
+def test_add_robot_errors(robot_manager):
+    with pytest.raises(server.RobotConflict, match='already uses uagv'):
+        robot_manager.add_robot({'name': 'twin', 'serial_number': 'ardennis-3420987-k'})
+    # A login the broker has but robots.json does not (made by hand): not taken over.
+    with open(robot_manager.broker_auth.passwd_path, 'a') as f:
+        f.write('ghost:$7$101$a$b\n')
+    with pytest.raises(server.RobotConflict, match='broker already has a login'):
+        robot_manager.add_robot({'name': 'ghost', 'serial_number': 'g'})
+    with pytest.raises(server.RobotError, match='reserved'):
+        robot_manager.add_robot({'name': 'rmf', 'serial_number': 's'})
+    with pytest.raises(server.RobotError, match='not a waypoint of the active site'):
+        robot_manager.add_robot({'name': 'b', 'serial_number': 'b', 'charger': 'nowhere'})
+    with pytest.raises(server.RobotNotFound):
+        robot_manager.rotate_password('nobody')
+
+
+def test_robots_without_broker_logins(manager):
+    """Local compose: anonymous broker, so a robot gets an identity but no login."""
+    added = manager.add_robot({'name': 'ardennes_e', 'serial_number': 'ardennis-3420987-e',
+                               'charger': 'ardennes_charger'})
+    assert added['password'] is None
+    assert 'ISAACBOT_AMR_VDA5050_BROKER_USER' not in added['balena']
+    assert manager.robots()['robots'][1]['charger'] == 'ardennes_charger'
+    with pytest.raises(server.RequestError, match='no logins'):
+        manager.rotate_password('ardennes_e')
+
+
+def test_robots_list_survives_a_dead_fleet_api(robot_manager):
+    def down():
+        raise OSError('connection refused')
+    robot_manager.fleet_state = down
+    assert robot_manager.robots()['robots'][0]['live'] is None
+
+
+def test_http_robots(robot_manager):
+    httpd = ThreadingHTTPServer(('127.0.0.1', 0), server.make_handler(
+        robot_manager, os.path.join(REPO, 'site_manager', 'static')))
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    url = f'http://127.0.0.1:{httpd.server_address[1]}'
+    try:
+        code, _, body = request(f'{url}/api/robots')
+        assert code == 200 and json.loads(body)['robots'][0]['name'] == 'ardennes'
+        body = {'name': 'ardennes_e', 'serial_number': 'ardennis-3420987-e'}
+        code, _, data = request(f'{url}/api/robots', 'POST', body)
+        assert code == 200 and json.loads(data)['password']
+        assert request(f'{url}/api/robots', 'POST', body)[0] == 409
+        assert request(f'{url}/api/robots', 'POST', {'name': '9'})[0] == 400
+        assert request(f'{url}/api/robots/ardennes_e/password', 'POST', {})[0] == 200
+        assert request(f'{url}/api/robots/nobody/password', 'POST', {})[0] == 404
+        assert request(f'{url}/api/robots/ardennes_e', 'DELETE')[0] == 200
+        assert request(f'{url}/api/robots/ardennes_e', 'DELETE')[0] == 404
+    finally:
+        httpd.shutdown()
+
+
+def test_http_basic_auth(manager):
+    httpd = ThreadingHTTPServer(('127.0.0.1', 0), server.make_handler(
+        manager, os.path.join(REPO, 'site_manager', 'static'), password='s3cret'))
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    url = f'http://127.0.0.1:{httpd.server_address[1]}'
+
+    def get(path, auth=None):
+        req = urllib.request.Request(url + path)
+        if auth:
+            req.add_header('Authorization', 'Basic ' + base64.b64encode(auth.encode()).decode())
+        try:
+            with urllib.request.urlopen(req) as res:
+                return res.status, res.headers
+        except urllib.error.HTTPError as e:
+            return e.code, e.headers
+    try:
+        code, headers = get('/')
+        assert code == 401 and headers['WWW-Authenticate'].startswith('Basic')
+        assert get('/api/robots', 'admin:wrong')[0] == 401
+        assert get('/api/robots', 'admin:s3cret')[0] == 200
+        assert get('/', 'anyone:s3cret')[0] == 200
+        req = urllib.request.Request(url + '/api/robots', data=b'{}', method='POST')
+        with pytest.raises(urllib.error.HTTPError) as e:
+            urllib.request.urlopen(req)
+        assert e.value.code == 401
+    finally:
+        httpd.shutdown()

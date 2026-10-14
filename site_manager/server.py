@@ -24,6 +24,11 @@ lanes. Activate writes the site's name to <sites>/active; docker/run_rmf.sh, whi
 restarts RMF on it. Built-in sites (isaacbot_amr_world, and CLI imports in isaacbot_amr_rmf_maps) can be
 activated too.
 
+Robots: the fleet's isaacbots (<sites>/robots.json, see robots.py). Adding one gives it a broker
+login limited to its own VDA 5050 topics (server deployment: BROKER_AUTH_DIR) and an RMF fleet
+entry; run_rmf.sh restarts RMF on the new list. The new password is shown once, with the balena
+variables to paste.
+
 Environment:
     SITES_DIR       the rmf-sites volume (default /sites)
     BUILTIN_MAPS    isaacbot_amr_rmf_maps' installed maps directory
@@ -32,9 +37,18 @@ Environment:
     ISAACBOT_AMR_SSH_PORT  default 24
     ISAACBOT_AMR_BROKER    host[:port] written into imported sites (default the ISAACBOT_AMR_SSH host, 1883)
     MAPS_DIR        read maps from this directory instead of ssh (the sim's --maps-dir)
+    BROKER_AUTH_DIR Mosquitto password file + ACL to manage (the broker-auth volume); unset: the
+                    broker is anonymous (local compose) and robots get no login
+    ROBOT_BROKER    host[:port] the isaacbots reach the broker on, for the balena variables
+                    (default ISAACBOT_AMR_BROKER)
+    FLEET_API       the fleet adapter's control API, for live robot state (default http://rmf:8030)
+    SITE_MANAGER_PASSWORD  when set, every request needs HTTP Basic auth with this password
     PORT            default 8020
 """
 
+import base64
+from dataclasses import asdict, replace
+import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -46,15 +60,20 @@ import tempfile
 import threading
 import time
 from typing import Callable, Optional, Sequence
+from urllib.error import URLError
 from urllib.parse import unquote
+from urllib.request import urlopen
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 for candidate in (os.path.join(HERE, '..', 'isaacbot_amr_rmf_maps', 'scripts'),
                   '/opt/isaacbot_amr_rmf_maps_scripts'):
     if os.path.isdir(candidate):
         sys.path.insert(0, candidate)
+sys.path.insert(0, HERE)
 
 from isaacbot_amr_map_import import import_site, MapImportError  # noqa: E402
+import robots as fleet_robots  # noqa: E402
+from robots import Robot, RobotConflict, RobotError, RobotNotFound  # noqa: E402
 from site_io import DirMapSource, render_preview, SshMapSource  # noqa: E402
 from site_io import write_site  # noqa: E402
 import yaml  # noqa: E402
@@ -77,7 +96,10 @@ class SiteManager:
 
     def __init__(self, sites_dir: str, builtin_maps: str, template_path: str, source,
                  broker: tuple, nav_graph_cmd: Sequence[str] = NAV_GRAPH_CMD,
-                 clock: Callable[[], float] = time.time):
+                 clock: Callable[[], float] = time.time,
+                 broker_auth: Optional[fleet_robots.BrokerAuth] = None,
+                 robot_broker: Optional[tuple] = None,
+                 fleet_state: Optional[Callable[[], dict]] = None):
         self.sites_dir = sites_dir
         self.builtin_maps = builtin_maps
         self.template_path = template_path
@@ -85,9 +107,14 @@ class SiteManager:
         self.broker = broker
         self.nav_graph_cmd = list(nav_graph_cmd)
         self.clock = clock
+        self.broker_auth = broker_auth
+        self.robot_broker = robot_broker or broker
+        self.fleet_state = fleet_state or (lambda: {})
+        self.robots_path = os.path.join(sites_dir, 'robots.json')
         self._lock = threading.Lock()          # one import/activate/delete at a time
         self._access = ('unknown', '', 0.0)    # cached isaacbot access check
         os.makedirs(sites_dir, exist_ok=True)
+        self._seed_robots()
 
     # --- sites -----------------------------------------------------------------------------
 
@@ -259,6 +286,137 @@ class SiteManager:
                 return path
         return None
 
+    # --- robots ----------------------------------------------------------------------------
+
+    def _seed_robots(self) -> None:
+        """robots.json starts as the fleet template's robots (Ardennes keeps its login)."""
+        if os.path.isfile(self.robots_path):
+            return
+        try:
+            with open(self.template_path) as f:
+                template = yaml.safe_load(f) or {}
+        except OSError:
+            return
+        fleet_robots.save(self.robots_path, fleet_robots.from_fleet_config(template))
+
+    def _robot_list(self) -> list:
+        return fleet_robots.load(self.robots_path) or []
+
+    def _active_site(self) -> Optional[dict]:
+        """The site RMF runs (or will): as run_rmf.sh picks it, isaacbot_amr_world by default."""
+        name = (self.rmf_status().get('site') or self.active()
+                or os.environ.get('RMF_SITE') or 'isaacbot_amr_world')
+        return next((s for s in self.sites() if s['name'] == name), None)
+
+    def robots(self) -> dict:
+        try:
+            live = {r.get('name'): r for r in (self.fleet_state() or {}).get('robots') or []}
+        except Exception:  # noqa: B902 RMF restarting or down: no live state, still the list
+            live = {}
+        site = self._active_site() or {}
+        robots = []
+        for robot in self._robot_list():
+            entry = asdict(robot)
+            entry.update(broker_login=robot.broker_login, topic_prefix=robot.topic_prefix,
+                         live=live.get(robot.name))
+            robots.append(entry)
+        return {'robots': robots, 'broker_auth': self.broker_auth is not None,
+                'broker': f'{self.robot_broker[0]}:{self.robot_broker[1]}',
+                'site': site.get('name'), 'waypoints': site.get('waypoints') or [],
+                'site_charger': site.get('charger')}
+
+    def add_robot(self, request: dict) -> dict:
+        def field(key: str, default: str = '') -> str:
+            value = request.get(key, default)
+            return value.strip() if isinstance(value, str) else default
+
+        robot = Robot(name=field('name'), serial_number=field('serial_number'),
+                      manufacturer=field('manufacturer') or fleet_robots.DEFAULT_MANUFACTURER,
+                      login=field('login'), charger=field('charger'))
+        reserved = (self.broker_auth.master_login,) if self.broker_auth else ()
+        fleet_robots.validate(robot, reserved)
+        waypoints = (self._active_site() or {}).get('waypoints')
+        if robot.charger and waypoints and robot.charger not in waypoints:
+            raise RobotError(f'{robot.charger!r} is not a waypoint of the active site')
+        with self._lock:
+            robots = self._robot_list()
+            fleet_robots.check_unique(robots, robot)
+            if self.broker_auth and robot.broker_login in self.broker_auth.logins():
+                raise RobotConflict(f'the broker already has a login {robot.broker_login!r}')
+            robots.append(robot)
+            password = self._set_login(robot, robots)
+            fleet_robots.save(self.robots_path, robots)
+        return self._credentials(robot, password)
+
+    def rotate_password(self, name: str) -> dict:
+        if self.broker_auth is None:
+            raise RequestError('this broker has no logins (local compose): nothing to rotate')
+        with self._lock:
+            robots = self._robot_list()
+            robot = self._find(robots, name)
+            password = self._set_login(robot, robots)
+        return self._credentials(robot, password)
+
+    def delete_robot(self, name: str) -> dict:
+        with self._lock:
+            robots = self._robot_list()
+            robot = self._find(robots, name)
+            if len(robots) == 1:
+                raise RequestError('the fleet needs at least one robot; add the new one first')
+            robots = [r for r in robots if r.name != name]
+            fleet_robots.save(self.robots_path, robots)
+            if self.broker_auth:
+                self.broker_auth.write_acl(robots)
+                self.broker_auth.set_password(robot.broker_login, None)
+        return {'deleted': name}
+
+    @staticmethod
+    def _find(robots: list, name: str) -> Robot:
+        robot = next((r for r in robots if r.name == name), None)
+        if robot is None:
+            raise RobotNotFound(f'no robot {name!r}')
+        return robot
+
+    def _set_login(self, robot: Robot, robots: list) -> Optional[str]:
+        """A new password for the robot's login (and the ACL for robots); None without auth."""
+        if self.broker_auth is None:
+            return None
+        password = fleet_robots.make_password()
+        self.broker_auth.set_password(robot.broker_login, password)
+        self.broker_auth.write_acl(robots)
+        return password
+
+    def _credentials(self, robot: Robot, password: Optional[str]) -> dict:
+        """What the isaacbot's balena variables must say (the password is not stored)."""
+        host, port = self.robot_broker
+        variables = {
+            'ISAACBOT_AMR_VDA5050_ENABLE': 'true',
+            'ISAACBOT_AMR_VDA5050_LOCAL_BROKER': 'false',
+            'ISAACBOT_AMR_VDA5050_BROKER_HOST': str(host),
+            'ISAACBOT_AMR_VDA5050_BROKER_PORT': str(port),
+            'ISAACBOT_AMR_VDA5050_MANUFACTURER': robot.manufacturer,
+            'ISAACBOT_AMR_VDA5050_SERIAL_NUMBER': robot.serial_number,
+        }
+        if password is not None:
+            variables.update({
+                'ISAACBOT_AMR_VDA5050_BROKER_USER': robot.broker_login,
+                'ISAACBOT_AMR_VDA5050_BROKER_PASSWORD': password,
+                'ISAACBOT_AMR_VDA5050_BROKER_TLS': 'false',
+            })
+        return {'robot': asdict(replace(robot, login=robot.broker_login)),
+                'password': password, 'balena': variables}
+
+
+def fleet_api_state(url: str, timeout: float = 1.0) -> Callable[[], dict]:
+    """GET <url>/api/robots on the fleet adapter's control API ({} when it does not answer)."""
+    def fetch() -> dict:
+        try:
+            with urlopen(f'{url.rstrip("/")}/api/robots', timeout=timeout) as response:
+                return json.load(response)
+        except (URLError, OSError, ValueError):
+            return {}
+    return fetch
+
 
 def public_key() -> str:
     path = os.path.expanduser('~/.ssh/id_ed25519.pub')
@@ -283,14 +441,32 @@ def ensure_key() -> None:
 BRAND_ICONS = ('/isaacbot-mark-black.svg', '/isaacbot-mark-white.svg')
 
 
-def make_handler(manager: SiteManager, static_dir: str):
+def make_handler(manager: SiteManager, static_dir: str, password: str = ''):
+    """password: when set, every request needs HTTP Basic auth with it (any user name)."""
 
     class Handler(BaseHTTPRequestHandler):
         server_version = 'IsaacbotRmfSites/1'
 
         def log_message(self, fmt, *args):
-            if not self.path.startswith('/api/status'):
+            if not self.path.startswith(('/api/status', '/api/robots')) or 'GET' not in fmt % args:
                 sys.stderr.write('site-manager: ' + fmt % args + '\n')
+
+        def _authorized(self) -> bool:
+            if not password:
+                return True
+            header = self.headers.get('Authorization', '')
+            if header.startswith('Basic '):
+                try:
+                    _, _, given = base64.b64decode(header[6:]).decode().partition(':')
+                except (ValueError, UnicodeDecodeError):
+                    given = ''
+                if hmac.compare_digest(given.encode(), password.encode()):
+                    return True
+            self.send_response(401)
+            self.send_header('WWW-Authenticate', 'Basic realm="RMF sites", charset="UTF-8"')
+            self.send_header('Content-Length', '0')
+            self.end_headers()
+            return False
 
         def _send(self, code: int, body: bytes, content_type: str):
             self.send_response(code)
@@ -306,7 +482,11 @@ def make_handler(manager: SiteManager, static_dir: str):
         def _call(self, action):
             try:
                 self._json(200, action())
-            except (RequestError, MapImportError) as e:
+            except RobotNotFound as e:
+                self._json(404, {'error': str(e)})
+            except RobotConflict as e:
+                self._json(409, {'error': str(e)})
+            except (RequestError, MapImportError, RobotError) as e:
                 self._json(400, {'error': str(e)})
             except Exception as e:  # noqa: B902 the page shows it; the server keeps running
                 self._json(500, {'error': f'{type(e).__name__}: {e}'})
@@ -322,6 +502,8 @@ def make_handler(manager: SiteManager, static_dir: str):
             return data
 
         def do_GET(self):  # noqa: N802
+            if not self._authorized():
+                return
             path = unquote(self.path.split('?')[0])
             if path in ('/', '/index.html'):
                 with open(os.path.join(static_dir, 'index.html'), 'rb') as f:
@@ -334,6 +516,8 @@ def make_handler(manager: SiteManager, static_dir: str):
                 return self._call(manager.status)
             if path == '/api/isaacbot/maps':
                 return self._call(manager.isaacbot_amr_maps)
+            if path == '/api/robots':
+                return self._call(manager.robots)
             match = re.fullmatch(r'/sites/([^/]+)/(preview|floorplan)\.png', path)
             if match:
                 try:
@@ -346,16 +530,28 @@ def make_handler(manager: SiteManager, static_dir: str):
             self._json(404, {'error': 'not found'})
 
         def do_POST(self):  # noqa: N802
+            if not self._authorized():
+                return
             if self.path == '/api/import':
                 return self._call(lambda: manager.import_map(self._body()))
             if self.path == '/api/activate':
                 return self._call(lambda: manager.activate(self._body()))
+            if self.path == '/api/robots':
+                return self._call(lambda: manager.add_robot(self._body()))
+            match = re.fullmatch(r'/api/robots/([^/]+)/password', unquote(self.path))
+            if match:
+                return self._call(lambda: manager.rotate_password(match.group(1)))
             self._json(404, {'error': 'not found'})
 
         def do_DELETE(self):  # noqa: N802
+            if not self._authorized():
+                return
             match = re.fullmatch(r'/api/sites/([^/]+)', unquote(self.path))
             if match:
                 return self._call(lambda: manager.delete(match.group(1)))
+            match = re.fullmatch(r'/api/robots/([^/]+)', unquote(self.path))
+            if match:
+                return self._call(lambda: manager.delete_robot(match.group(1)))
             self._json(404, {'error': 'not found'})
 
     return Handler
@@ -371,6 +567,8 @@ def main():
     else:
         ensure_key()
         source = SshMapSource(ssh_target, int(os.environ.get('ISAACBOT_AMR_SSH_PORT', '24')))
+    robot_host, _, robot_port = os.environ.get('ROBOT_BROKER', broker).partition(':')
+    auth_dir = os.environ.get('BROKER_AUTH_DIR', '')
     manager = SiteManager(
         sites_dir=os.environ.get('SITES_DIR', '/sites'),
         builtin_maps=os.environ.get(
@@ -379,12 +577,18 @@ def main():
             'FLEET_TEMPLATE',
             '/rmf_ws/install/isaacbot_amr_rmf_bringup/share/isaacbot_amr_rmf_bringup/config/'
             'fleet_isaacbot_amr_world.yaml'),
-        source=source, broker=(broker_host, int(broker_port or 1883)))
+        source=source, broker=(broker_host, int(broker_port or 1883)),
+        broker_auth=fleet_robots.BrokerAuth(auth_dir) if auth_dir else None,
+        robot_broker=(robot_host, int(robot_port or 1883)),
+        fleet_state=fleet_api_state(os.environ.get('FLEET_API', 'http://rmf:8030')))
     port = int(os.environ.get('PORT', '8020'))
+    password = os.environ.get('SITE_MANAGER_PASSWORD', '')
     server = ThreadingHTTPServer(('0.0.0.0', port),
-                                 make_handler(manager, os.path.join(HERE, 'static')))
+                                 make_handler(manager, os.path.join(HERE, 'static'), password))
     print(f'RMF site manager on :{port}; maps from {source.describe()}, sites in '
-          f'{manager.sites_dir}', flush=True)
+          f'{manager.sites_dir}; broker logins '
+          f'{"managed in " + auth_dir if auth_dir else "off (anonymous broker)"}; '
+          f'{"password protected" if password else "no password"}', flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

@@ -14,3 +14,6 @@ isaacbot_amr_rmf_bringup/config/fleet_*.yaml
 
 # Server deployment secrets (docker/rmf-server.sh init): broker passwords, mosquitto logins.
 docker/server/
+
+# The simulated site's WireGuard key and broker password (sim_site/README.md).
+sim_site/secrets/
