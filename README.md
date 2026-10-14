@@ -21,7 +21,7 @@ ROS distros never share a graph.
  │ schedule visualizer (:8006) · isaacbot_amr_rmf_fleet_adapter (EasyFullControl + paho)   │
  │ mosquitto (host :1884)                                                           │
  └──────────────────────────────┬──────────────────────────────────────────────────┘
-      MQTT uagv/v2/IsaacBot/ardennes/{order, instantActions ↓ · state, connection, visualization ↑}
+      MQTT uagv/v2/IsaacBot/ardennis-3420987-k/{order, instantActions ↓ · state, connection, visualization ↑}
  Host (Lyrical, rmw_zenoh)      ▼
    isaacbot_amr_vda5050 connector → isaacbot_amr_mission_manager → Nav 2 → Gazebo (isaacbot_amr_gazebo)
 ```
@@ -277,7 +277,7 @@ while the laptop is off. Every port is published on the WireGuard address only.
 
 | Port on 10.8.0.1 | Service |
 |---|---|
-| 1883 | Mosquitto, with logins: `rmf` (this stack) and `ardennes` (only its own `uagv/v2/IsaacBot/ardennes/#`) |
+| 1883 | Mosquitto, with logins: `rmf` (this stack) and `ardennes` (only its own `uagv/v2/IsaacBot/ardennis-3420987-k/#`) |
 | 3000 | Dashboard |
 | 8010 | api-server |
 | 8006 | Trajectory websocket (dashboard map) |

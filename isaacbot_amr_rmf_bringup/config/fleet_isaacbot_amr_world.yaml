@@ -96,4 +96,5 @@ vda5050:
   control_api_port: 8030
   robots:
     ardennes:
-      serial_number: "ardennes"
+      # = the isaacbot's ISAACBOT_AMR_VDA5050_SERIAL_NUMBER (balena).
+      serial_number: "ardennis-3420987-k"

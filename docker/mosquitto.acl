@@ -18,6 +18,7 @@
 user rmf
 topic readwrite uagv/#
 
-# Ardennes's connector only reaches its own topics.
+# Ardennes's connector only reaches its own topics: <manufacturer>/<serial> = the isaacbot's
+# ISAACBOT_AMR_VDA5050_MANUFACTURER / _SERIAL_NUMBER (balena). Change both together.
 user ardennes
-topic readwrite uagv/v2/IsaacBot/ardennes/#
+topic readwrite uagv/v2/IsaacBot/ardennis-3420987-k/#
