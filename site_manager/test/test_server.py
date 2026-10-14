@@ -170,6 +170,10 @@ def test_http_end_to_end(http):
 
     code, kind, body = request(f'{http}/robots/ardennes')
     assert code == 200 and kind.startswith('text/html') and b'Maps on this robot' in body
+    assert b'id="sites"' not in body                 # the sites have their own page
+    code, kind, body = request(f'{http}/sites')
+    assert code == 200 and kind.startswith('text/html') and b'id="sites"' in body
+    assert b'<h1>RMF sites</h1>' in body
     code, kind, body = request(f'{http}/common.js')
     assert code == 200 and kind.startswith('text/javascript') and b'function api' in body
     assert request(f'{http}/common.css')[0] == 200

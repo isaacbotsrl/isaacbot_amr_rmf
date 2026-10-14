@@ -17,7 +17,8 @@
 RMF site manager: a small web page for the fleet's robots and the RMF sites made from their maps.
 
     http://localhost:8020              the robots
-    http://localhost:8020/robots/<n>   one robot: its ssh access, its saved maps, the RMF sites
+    http://localhost:8020/robots/<n>   one robot: its ssh access, its saved maps (import)
+    http://localhost:8020/sites        the RMF sites (one runs, for the whole fleet): activate
 
 A robot page lists the maps isaacbot_amr_indoor_nav_manager saved on that isaacbot (over ssh, at the
 robot's own address; the page's one key is installed on each robot with isaacbot-authorize).
@@ -579,6 +580,8 @@ def make_handler(manager: SiteManager, static_dir: str, password: str = ''):
             path = unquote(self.path.split('?')[0])
             if path in ('/', '/index.html'):
                 return self._page('index.html')
+            if path in ('/sites', '/sites/'):
+                return self._page('sites.html')
             if re.fullmatch(r'/robots/[^/]+', path):
                 return self._page('robot.html')       # the page reads the name from its URL
             if path in STATIC:

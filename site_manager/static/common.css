@@ -46,10 +46,11 @@ body { margin: 0; font: 15px/1.5 var(--font-body); -webkit-font-smoothing: antia
                box-shadow: 0 1px 0 var(--line); }
 .site-header .container { height: 100%; display: flex; align-items: center; gap: 24px; }
 .site-header .logo img { display: block; width: 180px; height: auto; }
-.site-header .crumb { font-family: var(--font-head); font-size: 13px; font-weight: 500;
-                      letter-spacing: .08em; text-transform: uppercase; color: var(--muted);
-                      text-decoration: none; }
-.site-header .crumb:hover { color: var(--text); }
+.site-nav { display: flex; align-items: center; gap: 30px; }
+.site-nav a { white-space: nowrap; font-family: var(--font-head); font-size: 13px; font-weight: 500; letter-spacing: .12em;
+              text-transform: uppercase; color: var(--text); text-decoration: none; padding: 6px 0;
+              border-bottom: 1.5px solid transparent; transition: border-color .3s var(--ease); }
+.site-nav a:hover, .site-nav a.current { border-bottom-color: var(--ink); }
 .btn { display: inline-flex; align-items: center; gap: 14px; height: 44px; padding: 0 18px 0 22px;
        border-radius: 999px; border: 1.5px solid var(--ink); font-family: var(--font-head);
        font-size: 13px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase;
@@ -99,10 +100,12 @@ section { overflow-x: auto; }
 }
 @media (max-width: 560px) {
   .footer-grid { grid-template-columns: 1fr; }
-  .site-header .container { gap: 12px; }
-  .site-header .logo img { width: 110px; }
-  .site-header .crumb { display: none; }      /* the logo goes back to the robots too */
-  .btn { height: 40px; gap: 8px; padding: 0 12px 0 14px; font-size: 12px; letter-spacing: .02em; }
+  .site-header .container { gap: 10px; }
+  .site-header .logo img { width: 92px; }
+  .site-nav { gap: 12px; }
+  .site-nav a { font-size: 11px; letter-spacing: .02em; }
+  .wide-only { display: none; }               /* the button reads just "dashboard" */
+  .btn { height: 40px; gap: 6px; padding: 0 10px 0 12px; font-size: 12px; letter-spacing: .02em; }
 }
 section { background: var(--card); border: 1px solid var(--line); border-radius: 10px;
           padding: 16px 18px; }

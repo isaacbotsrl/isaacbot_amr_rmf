@@ -49,22 +49,10 @@
   <section>
     <h2>Maps on this robot <button id="refresh-maps">Refresh</button></h2>
     <p class="muted" style="margin-top:0">Maps saved with the drive UI in indoor mode. A map
-      needs at least two places; the charger is where the isaacbot parks. Importing a map again
-      replaces its site.</p>
+      needs at least two places; the charger is where the isaacbot parks. Importing makes it an
+      <a href="/sites">RMF site</a>; importing a map again replaces its site.</p>
     <div id="maps">Loading…</div>
     <div id="import-result"></div>
-  </section>
-
-  <section>
-    <h2>RMF sites <span class="badge">shared by all robots</span></h2>
-    <p class="legend muted" style="margin-top:0">
-      <span><i style="background:#2860d8"></i>lane</span>
-      <span><i style="background:#f08c14"></i>place</span>
-      <span><i style="background:#1eaa46"></i>charger</span>
-      RMF runs one site for the whole fleet: every robot must be localized on its map. Activate
-      restarts RMF on the site (about 10 s); reload the dashboard afterwards.
-    </p>
-    <div class="sites" id="sites"></div>
   </section>
 </main>
 <div id="site-footer"></div>
@@ -73,7 +61,7 @@
 <script>
 const NAME = decodeURIComponent(location.pathname.split('/')[2] || '');
 const ROBOT = `/api/robots/${encodeURIComponent(NAME)}`;
-siteChrome({href: '/', text: '← All robots'});
+siteChrome('robots');
 $('title').textContent = NAME;
 document.title = `${NAME} · RMF robots`;
 let robot = null, settingsKey = '';
@@ -123,38 +111,10 @@ function renderAccess(r) {
   setHtml('access', html);
 }
 
-function renderSites(status) {
-  const running = (status.rmf || {}).site, active = status.active || running;
-  setHtml('sites', status.sites.map((s) => {
-    const isActive = s.name === active;
-    const img = s.builtin ? `/sites/${encodeURIComponent(s.name)}/floorplan.png`
-                          : `/sites/${encodeURIComponent(s.name)}/preview.png?t=${s.modified}`;
-    const imp = s.import || {};
-    const warnings = (imp.warnings || []).map((w) => `<div class="warning">⚠ ${esc(w)}</div>`).join('');
-    const places = s.waypoints.map((w) => `<span class="chip ${w === s.charger ? 'charger' : ''}">${esc(w)}</span>`).join('');
-    const from = imp.robot ? ` from ${esc(imp.robot)}` : '';
-    return `<div class="site ${isActive ? 'active' : ''}">
-      <img src="${img}" alt="Floor plan of ${esc(s.name)}" loading="lazy">
-      <div class="body">
-        <div class="title">${esc(s.name)}
-          ${isActive ? `<span class="badge run">${running === s.name ? 'running' : 'starting'}</span>` : ''}
-          <span class="badge">${s.builtin ? 'built in' : 'imported ' + ago(s.modified) + from}</span></div>
-        <div>${places}</div>
-        <div class="muted">${s.waypoints.length} places · ${s.lanes} lanes${s.charger ? ` · charger ${esc(s.charger)}` : ''}</div>
-        ${warnings}
-      </div>
-      <div class="actions">
-        <button class="primary" data-activate="${esc(s.name)}" ${isActive ? 'disabled' : ''}>Activate</button>
-        ${s.builtin ? '' : `<button class="danger" data-delete="${esc(s.name)}" ${isActive ? 'disabled' : ''}>Delete</button>`}
-      </div>
-    </div>`;
-  }).join(''));
-}
-
 async function refresh() {
   try {
     const status = await api('GET', '/api/status');
-    renderRmf(status); renderSites(status);
+    renderRmf(status);
     robot = await api('GET', ROBOT);
     renderFacts(robot); renderAccess(robot);
   } catch (e) {
@@ -200,7 +160,7 @@ async function importMap(name, button) {
     const warnings = r.warnings.map((w) => `<div class="warning">⚠ ${esc(w)}</div>`).join('');
     $('import-result').innerHTML = `<div class="message ok"><b>${esc(name)}</b> imported:
       ${r.waypoints.length} places, ${r.lanes.length} lanes, charger ${esc(r.charger)}, clearance ${r.options.clearance} m.
-      ${r.active ? 'RMF runs this site, so it restarts on the new version now.' : 'Activate it below to run RMF on it.'}
+      ${r.active ? 'RMF runs this site, so it restarts on the new version now.' : 'Activate it on the <a href="/sites">RMF sites</a> page to run RMF on it.'}
       ${warnings}</div>`;
     await refresh();
   } catch (e) {
@@ -221,11 +181,6 @@ async function save(change, what) {
 onButtons({
   'refresh-maps': () => refreshMaps(),
   import: (b, name) => importMap(name, b),
-  activate: async (b, name) => { b.disabled = true; await api('POST', '/api/activate', {name}); await refresh(); },
-  delete: async (b, name) => {
-    if (!confirm(`Delete the site ${name}? The map on the isaacbot stays.`)) return;
-    await api('DELETE', `/api/sites/${encodeURIComponent(name)}`); await refresh();
-  },
   saveCharger: () => save({charger: $('charger').value}, 'Charger saved; RMF restarts with it now.'),
   saveSsh: async () => {
     await save({ssh: $('ssh').value.trim()}, 'SSH address saved.');

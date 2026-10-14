@@ -112,10 +112,12 @@ function onButtons(handlers) {
   });
 }
 
-// The IsaacBot website's header and footer (http://<server>/), on every page: the lockup, one
-// call to action (the RMF dashboard), and the dark footer. crumb: an optional link left of the
-// button, e.g. back to the robots.
-function siteChrome(crumb) {
+// The IsaacBot website's header and footer (http://<server>/), on every page: the lockup, the
+// page links (current: 'robots' or 'sites'), one call to action (the RMF dashboard), and the
+// dark footer.
+function siteChrome(current) {
+  const link = (href, page, text) =>
+    `<a href="${href}" ${page === current ? 'class="current" aria-current="page"' : ''}>${text}</a>`;
   const host = location.hostname;
   const chevron = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3l5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.8"></path></svg>';
   $('site-header').outerHTML = `<header class="site-header" id="top"><div class="container">
@@ -123,9 +125,9 @@ function siteChrome(crumb) {
         <picture><source media="(prefers-color-scheme: dark)" srcset="/isaacbot-lockup-white.svg">
           <img src="/isaacbot-lockup-black-bold.svg" alt="IsaacBot" width="180" height="25"></picture></a>
       <span class="spacer"></span>
-      ${crumb ? `<a class="crumb" href="${esc(crumb.href)}">${esc(crumb.text)}</a>` : ''}
+      <nav class="site-nav" aria-label="Main">${link('/', 'robots', 'Robots')}${link('/sites', 'sites', 'RMF sites')}</nav>
       <a class="btn" href="http://${host}:3000" target="_blank" rel="noopener">
-        <span>Open RMF dashboard</span><span class="btn-chevrons">${chevron}${chevron}</span></a>
+        <span><span class="wide-only">Open RMF </span>dashboard</span><span class="btn-chevrons">${chevron}${chevron}</span></a>
     </div></header>`;
   $('site-footer').outerHTML = `<footer class="site-footer">
       <div class="container footer-grid">
@@ -134,6 +136,7 @@ function siteChrome(crumb) {
           <p>From a falling apple to autonomous logistics.</p></div>
         <div class="footer-col"><h4>Navigate</h4><ul>
           <li><a href="/">Robots</a></li>
+          <li><a href="/sites">RMF sites</a></li>
           <li><a href="http://${host}:3000" target="_blank" rel="noopener">RMF dashboard</a></li>
           <li><a href="http://${host}/" target="_blank" rel="noopener">IsaacBot website</a></li></ul></div>
         <div class="footer-col"><h4>Contact</h4><ul>

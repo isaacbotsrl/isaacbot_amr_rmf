@@ -1,0 +1,105 @@
+<!doctype html>
+<!--
+  Copyright 2026 IsaacBot
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RMF sites</title>
+<link rel="icon" type="image/svg+xml" href="/isaacbot-mark-black.svg" media="(prefers-color-scheme: light)">
+<link rel="icon" type="image/svg+xml" href="/isaacbot-mark-white.svg" media="(prefers-color-scheme: dark)">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="/common.css">
+</head>
+<body>
+<div id="site-header"></div>
+<main>
+  <div class="page-title">
+    <h1>RMF sites</h1>
+    <span class="spacer"></span>
+    <span class="status rmf-status" id="rmf"><span class="dot"></span><span>…</span></span>
+  </div>
+  <section>
+    <p class="muted" style="margin-top:0">RMF runs one site for the whole fleet: every robot must
+      be localized on its map. Sites are imported from the maps saved on a robot (open it on
+      <a href="/">Robots</a>). Activate restarts RMF on the site (about 10 s); reload the dashboard
+      afterwards.</p>
+    <p class="legend muted">
+      <span><i style="background:#2860d8"></i>lane</span>
+      <span><i style="background:#f08c14"></i>place</span>
+      <span><i style="background:#1eaa46"></i>charger</span>
+    </p>
+    <div class="sites" id="sites">Loading…</div>
+  </section>
+</main>
+<div id="site-footer"></div>
+
+<script src="/common.js"></script>
+<script>
+siteChrome('sites');
+
+function renderSites(status) {
+  const running = (status.rmf || {}).site, active = status.active || running;
+  setHtml('sites', status.sites.map((s) => {
+    const isActive = s.name === active;
+    const img = s.builtin ? `/sites/${encodeURIComponent(s.name)}/floorplan.png`
+                          : `/sites/${encodeURIComponent(s.name)}/preview.png?t=${s.modified}`;
+    const imp = s.import || {};
+    const warnings = (imp.warnings || []).map((w) => `<div class="warning">⚠ ${esc(w)}</div>`).join('');
+    const places = s.waypoints.map((w) => `<span class="chip ${w === s.charger ? 'charger' : ''}">${esc(w)}</span>`).join('');
+    const from = imp.robot ? ` from ${esc(imp.robot)}` : '';
+    return `<div class="site ${isActive ? 'active' : ''}">
+      <img src="${img}" alt="Floor plan of ${esc(s.name)}" loading="lazy">
+      <div class="body">
+        <div class="title">${esc(s.name)}
+          ${isActive ? `<span class="badge run">${running === s.name ? 'running' : 'starting'}</span>` : ''}
+          <span class="badge">${s.builtin ? 'built in' : 'imported ' + ago(s.modified) + from}</span></div>
+        <div>${places}</div>
+        <div class="muted">${s.waypoints.length} places · ${s.lanes} lanes${s.charger ? ` · charger ${esc(s.charger)}` : ''}</div>
+        ${warnings}
+      </div>
+      <div class="actions">
+        <button class="primary" data-activate="${esc(s.name)}" ${isActive ? 'disabled' : ''}>Activate</button>
+        ${s.builtin ? '' : `<button class="danger" data-delete="${esc(s.name)}" ${isActive ? 'disabled' : ''}>Delete</button>`}
+      </div>
+    </div>`;
+  }).join(''));
+}
+
+async function refresh() {
+  try {
+    const status = await api('GET', '/api/status');
+    renderRmf(status); renderSites(status);
+  } catch (e) {
+    setHtml('rmf', `<span class="dot bad"></span><span>Site manager unreachable: ${esc(e.message)}</span>`);
+  }
+}
+
+onButtons({
+  activate: async (b, name) => { b.disabled = true; await api('POST', '/api/activate', {name}); await refresh(); },
+  delete: async (b, name) => {
+    if (!confirm(`Delete the site ${name}? The map on the isaacbot stays.`)) return;
+    await api('DELETE', `/api/sites/${encodeURIComponent(name)}`); await refresh();
+  },
+});
+
+refresh();
+setInterval(refresh, 3000);
+</script>
+</body>
+</html>
