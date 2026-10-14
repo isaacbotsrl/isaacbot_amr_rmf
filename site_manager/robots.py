@@ -17,8 +17,9 @@
 The fleet's isaacbots: one list (<sites>/robots.json) that RMF and the broker both follow.
 
 Each robot has an RMF name, a VDA 5050 identity (manufacturer, serialNumber: its topics are
-uagv/v2/<manufacturer>/<serial>/...), a broker login that may only use those topics, and a
-charger waypoint (empty: the site's charger).
+uagv/v2/<manufacturer>/<serial>/...), a broker login that may only use those topics, a charger
+waypoint (empty: the site's charger), and an ssh address (user@host[:port], default port 24) the
+sites page reads its saved maps from (empty: none, e.g. a simulated robot).
 
 - RMF: docker/run_rmf.sh merges the list into the active site's fleet config before launching
   (`robots.py merge`), and restarts RMF when the list changes.
@@ -40,13 +41,15 @@ import re
 import secrets
 import sys
 from dataclasses import asdict, dataclass
-from typing import Iterable, List, Optional, Sequence
+from typing import Iterable, List, Optional, Sequence, Tuple
 
 NAME = re.compile(r'[A-Za-z][A-Za-z0-9_]{0,63}')
 # VDA 5050 2.0 serialNumber / manufacturer characters (topic levels: no / + # $).
 VDA_ID = re.compile(r'[A-Za-z0-9_.:-]{1,64}')
 LOGIN = re.compile(r'[A-Za-z0-9_.-]{1,64}')
+SSH = re.compile(r'[A-Za-z0-9._-]+@[A-Za-z0-9.-]+(:[0-9]{1,5})?')
 DEFAULT_MANUFACTURER = 'IsaacBot'
+DEFAULT_SSH_PORT = 24          # the isaacbot orchestrator container's sshd
 MOSQUITTO_UID = 1883          # the eclipse-mosquitto image's user; it must own its auth files
 PBKDF2_ITERATIONS = 101       # mosquitto_passwd's default for $7$ (PBKDF2-SHA512)
 
@@ -70,10 +73,18 @@ class Robot:
     manufacturer: str = DEFAULT_MANUFACTURER
     login: str = ''                # broker login; '' = name
     charger: str = ''              # waypoint; '' = the site's charger
+    ssh: str = ''                  # user@host[:port] of its maps; '' = none (not RMF's concern)
 
     @property
     def broker_login(self) -> str:
         return self.login or self.name
+
+    def ssh_target(self) -> Optional[Tuple[str, int]]:
+        """(user@host, port) of the robot's sshd, or None when it has no ssh address."""
+        if not self.ssh:
+            return None
+        target, _, port = self.ssh.partition(':')
+        return target, int(port) if port else DEFAULT_SSH_PORT
 
     @property
     def topic_prefix(self) -> str:
@@ -93,6 +104,9 @@ def validate(robot: Robot, reserved_logins: Sequence[str] = ()) -> Robot:
         raise RobotError(f'the broker login {robot.broker_login!r} is reserved')
     if robot.charger and not re.fullmatch(r'[^\s]{1,128}', robot.charger):
         raise RobotError(f'{robot.charger!r} is not a waypoint name')
+    if robot.ssh:
+        if not SSH.fullmatch(robot.ssh) or not 0 < robot.ssh_target()[1] < 65536:
+            raise RobotError(f'{robot.ssh!r} is not an ssh address (user@host or user@host:port)')
     return robot
 
 
@@ -120,10 +134,12 @@ def load(path: str) -> Optional[List[Robot]]:
 
 
 def save(path: str, robots: Sequence[Robot]) -> None:
+    # One field per line: run_rmf.sh fingerprints the file without its "ssh" lines, so changing
+    # where a robot's maps are read from does not restart RMF.
     _write_atomic(path, json.dumps({'robots': [asdict(r) for r in robots]}, indent=1) + '\n')
 
 
-def from_fleet_config(config: dict) -> List[Robot]:
+def from_fleet_config(config: dict, ssh: str = '') -> List[Robot]:
     """The robots a fleet config names (to seed robots.json from the fleet template)."""
     vda = config.get('vda5050') or {}
     vda_robots = vda.get('robots') or {}
@@ -134,7 +150,7 @@ def from_fleet_config(config: dict) -> List[Robot]:
         robots.append(Robot(
             name=name,
             serial_number=str(entry.get('serial_number') or name),
-            manufacturer=str(entry.get('manufacturer') or manufacturer)))
+            manufacturer=str(entry.get('manufacturer') or manufacturer), ssh=ssh))
     return robots
 
 

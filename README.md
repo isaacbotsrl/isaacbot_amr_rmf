@@ -36,7 +36,7 @@ ROS distros never share a graph.
 | `dashboard/` | Our rmf-web dashboard app: IsaacBot branding, the **ISAACBOT TASK** dialog (`tasks/`) and the **Isaacbot** window (`isaacbot/`: drive mode, in or out of the fleet). See [Dashboard](#dashboard). |
 | `docker/` | `Dockerfile.rmf` (Jazzy, RMF debs, builds and tests the packages), `docker-compose.yml` (mosquitto, rmf, rmf-web api-server and dashboard), broker and api-server configs. `Dockerfile.dashboard` builds `dashboard/` inside a pinned rmf-web checkout. |
 | `scripts/start_sim_isaacbot.sh` | Starts the simulated isaacbot's side in one terminal: Nav 2, drive mode, mission manager and the VDA 5050 connector on `:1884`. It then sets the drive mode to AUTOMATIC. `--localization indoor` behaves like the real isaacbot. |
-| `site_manager/` | The RMF sites page (<http://localhost:8020>, compose service `site-manager`): lists the maps saved on the isaacbot, imports them as sites into the `rmf-sites` volume, and activates one. `docker/run_rmf.sh` runs RMF for the active site and restarts it on a switch. |
+| `site_manager/` | The RMF robots and sites page (<http://localhost:8020>, compose service `site-manager`). The main page lists the fleet's robots. A robot's page lists the maps saved on that isaacbot, imports them as sites into the `rmf-sites` volume, and activates one; the sites are shared by the fleet. `docker/run_rmf.sh` runs RMF for the active site and restarts it on a switch. |
 | `scripts/import_isaacbot_amr_map.py` | The same import from the command line, into `isaacbot_amr_rmf_maps/maps/` (git-ignored, built into the local image). |
 
 ## How a command reaches the isaacbot
@@ -196,10 +196,11 @@ drive UI, and that map becomes the RMF site.
    docker compose -f docker/docker-compose.yml exec site-manager isaacbot-authorize   # once; password root
    ```
    `isaacbot-authorize` puts the sites page's own ssh key on the isaacbot, which asks for its
-   password once. A new isaacbot release forgets the key; the page then says so, and you run the
-   command again.
-6. **Import and activate the map** on the RMF sites page, <http://localhost:8020>.
-   - **Maps on the isaacbot** lists the saved maps with their places. Pick the charger place
+   password once. A new isaacbot release forgets the key; the robot's page then says so, and you
+   run the command again. Each robot's page shows the command for that robot (its ssh address
+   as arguments).
+6. **Import and activate the map** on <http://localhost:8020>: open the robot (`ardennes`).
+   - **Maps on this robot** lists the saved maps with their places. Pick the charger place
      (default `dock`) and press **Import**.
    - The site appears under **RMF sites** with a preview: lanes in blue, places in orange, the
      charger in green. Warnings name places too close to obstacles.
@@ -292,8 +293,9 @@ while the laptop is off. Every port is published on the WireGuard address only.
    ```bash
    docker/rmf-server.sh init            # docker/server/.env, broker logins, sites page password (git-ignored)
    docker/rmf-server.sh up -d --build
-   docker/rmf-server.sh exec site-manager isaacbot-authorize   # once per isaacbot release
+   docker/rmf-server.sh exec site-manager isaacbot-authorize <user@host> <port>   # per robot, once per release
    ```
+   Each robot's page on the sites page shows that command with its own ssh address.
 
 `docker/rmf-server.sh` wraps `docker compose` with `docker-compose.server.yml` and
 `server/.env`. That overlay does three things:
@@ -304,8 +306,21 @@ while the laptop is off. Every port is published on the WireGuard address only.
 
 ### Robots
 
-The sites page (`:8020`, **Robots**) manages the fleet's isaacbots. It keeps one list,
-`robots.json` in the rmf-sites volume, and both RMF and the broker follow it:
+The sites page (`:8020`) lists the fleet's isaacbots. It keeps one list, `robots.json` in the
+rmf-sites volume, and both RMF and the broker follow it.
+
+Clicking a robot opens its page (`/robots/<name>`), which has:
+- its identity and live state, and its charger and SSH address, both editable;
+- **SSH access**: whether the page can read the robot's maps, with the `isaacbot-authorize`
+  command for this robot;
+- **Maps on this robot**, with Import;
+- the RMF sites. They are shared by all robots, because RMF runs one site for the fleet.
+
+Changing a robot's charger restarts RMF. Changing its SSH address does not: `run_rmf.sh`
+ignores the `ssh` lines of `robots.json`. A robot with no SSH address, such as a simulated one,
+has no maps of its own and uses the site imported from another robot.
+
+On the main page:
 
 - **Add** creates the robot's broker login, which may only use its own topics, and its ACL entry,
   and adds it to RMF's fleet config with its charger. It shows the balena variables, password

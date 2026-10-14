@@ -1,0 +1,250 @@
+<!doctype html>
+<!--
+  Copyright 2026 IsaacBot
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Robot</title>
+<link rel="icon" type="image/svg+xml" href="/isaacbot-mark-black.svg" media="(prefers-color-scheme: light)">
+<link rel="icon" type="image/svg+xml" href="/isaacbot-mark-white.svg" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="/common.css">
+</head>
+<body>
+<header>
+  <picture class="logo">
+    <source media="(prefers-color-scheme: dark)" srcset="/isaacbot-mark-white.svg">
+    <img src="/isaacbot-mark-black.svg" alt="IsaacBot">
+  </picture>
+  <a class="back" href="/">← Robots</a>
+  <h1 id="title">…</h1>
+  <span id="live"></span>
+  <span class="spacer"></span>
+  <span class="status" id="rmf"><span class="dot"></span><span>…</span></span>
+  <a id="dashboard" href="#" target="_blank" rel="noopener">RMF dashboard ↗</a>
+</header>
+<main>
+  <section>
+    <h2>Robot</h2>
+    <div id="facts">Loading…</div>
+    <div id="robot-result"></div>
+  </section>
+
+  <section>
+    <h2>SSH access</h2>
+    <div id="access">Checking…</div>
+  </section>
+
+  <section>
+    <h2>Maps on this robot <button id="refresh-maps">Refresh</button></h2>
+    <p class="muted" style="margin-top:0">Maps saved with the drive UI in indoor mode. A map
+      needs at least two places; the charger is where the isaacbot parks. Importing a map again
+      replaces its site.</p>
+    <div id="maps">Loading…</div>
+    <div id="import-result"></div>
+  </section>
+
+  <section>
+    <h2>RMF sites <span class="badge">shared by all robots</span></h2>
+    <p class="legend muted" style="margin-top:0">
+      <span><i style="background:#2860d8"></i>lane</span>
+      <span><i style="background:#f08c14"></i>place</span>
+      <span><i style="background:#1eaa46"></i>charger</span>
+      RMF runs one site for the whole fleet: every robot must be localized on its map. Activate
+      restarts RMF on the site (about 10 s); reload the dashboard afterwards.
+    </p>
+    <div class="sites" id="sites"></div>
+  </section>
+</main>
+
+<script src="/common.js"></script>
+<script>
+const NAME = decodeURIComponent(location.pathname.split('/')[2] || '');
+const ROBOT = `/api/robots/${encodeURIComponent(NAME)}`;
+$('dashboard').href = `http://${location.hostname}:3000`;
+$('title').textContent = NAME;
+document.title = `${NAME} · RMF robots`;
+let robot = null, settingsKey = '';
+
+function renderFacts(r) {
+  setHtml('live', robotState(r));
+  // The editable settings are re-rendered only when they changed on the server, not every
+  // refresh: an open select or a half-typed address must survive the 3 s poll.
+  const key = JSON.stringify([r.charger, r.ssh, r.waypoints, r.site_charger, r.broker_auth]);
+  if (key === settingsKey) return;
+  settingsKey = key;
+  const chargers = ['', ...r.waypoints].map((w) =>
+    `<option value="${esc(w)}" ${w === r.charger ? 'selected' : ''}>${w ? esc(w) : `site charger${r.site_charger ? ` (${esc(r.site_charger)})` : ''}`}</option>`).join('');
+  setHtml('facts', `<dl class="facts">
+      <dt>VDA 5050 identity</dt><dd><code>${esc(r.manufacturer)} / ${esc(r.serial_number)}</code>
+        <span class="muted">topics <code>${esc(r.topic_prefix)}/…</code></span></dd>
+      <dt>Broker login</dt><dd>${r.broker_auth ? `<code>${esc(r.broker_login)}</code> on <code>${esc(r.broker)}</code>
+        <button data-robot-password>New password</button>` : '<span class="muted">none (anonymous broker)</span>'}</dd>
+      <dt>Charger</dt><dd><select id="charger">${chargers}</select>
+        <button data-save-charger>Save</button><span class="muted">changing it restarts RMF</span></dd>
+      <dt>SSH</dt><dd><input type="text" id="ssh" value="${esc(r.ssh)}" placeholder="root@192.168.1.201:24" size="24">
+        <button data-save-ssh>Save</button><span class="muted">where this robot's saved maps are read from; empty for none</span></dd>
+      <dt></dt><dd><button class="danger" data-robot-delete>Remove this robot</button></dd>
+    </dl>`);
+}
+
+function renderAccess(r) {
+  const a = r.access;
+  let html;
+  if (a.state === 'ok') {
+    html = `<span class="status"><span class="dot ok"></span>Connected to ${esc(a.source)}</span>`;
+  } else if (a.state === 'no_ssh') {
+    html = `<span class="status"><span class="dot"></span>No SSH address</span>
+      <p class="muted">Set one above to read this robot's maps. A robot without maps (a simulation)
+         needs none; the sites are shared, so it uses the site imported from another robot.</p>`;
+  } else if (a.state === 'needs_key') {
+    html = `<span class="status"><span class="dot warn"></span>${esc(NAME)} does not know this page's key yet</span>
+      <p>Run this once in a terminal, in <code>src/isaacbot_amr_rmf</code> on the machine that runs RMF,
+         and type the isaacbot's root password when asked:</p>
+      <div class="cmd"><pre>${esc(r.authorize)}</pre><button data-copy>Copy</button></div>
+      <p class="muted">A new isaacbot release (balena push) forgets the key and changes the isaacbot's host key; run it again then and confirm the new host key.</p>`;
+  } else {
+    html = `<span class="status"><span class="dot bad"></span>Cannot reach ${esc(a.source)}</span>
+      <p class="muted">${esc(a.detail || '')}</p>
+      <p class="muted">Is the isaacbot on, and is its network reachable from the machine that runs RMF?</p>`;
+  }
+  setHtml('access', html);
+}
+
+function renderSites(status) {
+  const running = (status.rmf || {}).site, active = status.active || running;
+  setHtml('sites', status.sites.map((s) => {
+    const isActive = s.name === active;
+    const img = s.builtin ? `/sites/${encodeURIComponent(s.name)}/floorplan.png`
+                          : `/sites/${encodeURIComponent(s.name)}/preview.png?t=${s.modified}`;
+    const imp = s.import || {};
+    const warnings = (imp.warnings || []).map((w) => `<div class="warning">⚠ ${esc(w)}</div>`).join('');
+    const places = s.waypoints.map((w) => `<span class="chip ${w === s.charger ? 'charger' : ''}">${esc(w)}</span>`).join('');
+    const from = imp.robot ? ` from ${esc(imp.robot)}` : '';
+    return `<div class="site ${isActive ? 'active' : ''}">
+      <img src="${img}" alt="Floor plan of ${esc(s.name)}" loading="lazy">
+      <div class="body">
+        <div class="title">${esc(s.name)}
+          ${isActive ? `<span class="badge run">${running === s.name ? 'running' : 'starting'}</span>` : ''}
+          <span class="badge">${s.builtin ? 'built in' : 'imported ' + ago(s.modified) + from}</span></div>
+        <div>${places}</div>
+        <div class="muted">${s.waypoints.length} places · ${s.lanes} lanes${s.charger ? ` · charger ${esc(s.charger)}` : ''}</div>
+        ${warnings}
+      </div>
+      <div class="actions">
+        <button class="primary" data-activate="${esc(s.name)}" ${isActive ? 'disabled' : ''}>Activate</button>
+        ${s.builtin ? '' : `<button class="danger" data-delete="${esc(s.name)}" ${isActive ? 'disabled' : ''}>Delete</button>`}
+      </div>
+    </div>`;
+  }).join(''));
+}
+
+async function refresh() {
+  try {
+    const status = await api('GET', '/api/status');
+    renderRmf(status); renderSites(status);
+    robot = await api('GET', ROBOT);
+    renderFacts(robot); renderAccess(robot);
+  } catch (e) {
+    if (/no robot/.test(e.message)) {
+      setHtml('facts', `<p class="warning">${esc(e.message)}. <a href="/">Back to the robots</a></p>`);
+      return;
+    }
+    setHtml('rmf', `<span class="dot bad"></span><span>Site manager unreachable: ${esc(e.message)}</span>`);
+  }
+}
+
+async function refreshMaps() {
+  $('maps').textContent = 'Loading…';
+  try {
+    const maps = await api('GET', `${ROBOT}/maps`);
+    if (!maps.length) { $('maps').innerHTML = '<p class="muted">No maps saved on this robot yet.</p>'; return; }
+    $('maps').innerHTML = `<table><thead><tr><th>Map</th><th>Places</th><th>Charger</th><th title="How far lanes keep from obstacles and unexplored areas">Clearance</th><th></th></tr></thead><tbody>` +
+      maps.map((m) => {
+        const guess = m.places.find((p) => p.toLowerCase() === 'dock') || m.places[0] || '';
+        const options = m.places.map((p) => `<option ${p === guess ? 'selected' : ''}>${esc(p)}</option>`).join('');
+        const ready = m.has_map && m.places.length >= 2;
+        const hint = !m.has_map ? 'no map image' : m.places.length < 2 ? `save ${2 - m.places.length} more place(s) in the drive UI` : '';
+        return `<tr><td><b>${esc(m.name)}</b>${m.active ? ' <span class="badge">loaded on the isaacbot</span>' : ''}
+                  <div class="muted">${m.modified ? 'saved ' + ago(m.modified) : ''}</div></td>
+                <td class="places">${m.places.map((p) => `<span class="chip">${esc(p)}</span>`).join('') || '<span class="muted">none</span>'}</td>
+                <td>${m.places.length ? `<select id="charger-${esc(m.name)}">${options}</select>` : ''}</td>
+                <td><input id="clearance-${esc(m.name)}" type="number" min="0.3" max="3" step="0.05" value="0.8" style="width:4.5em"> m</td>
+                <td><button class="primary" data-import="${esc(m.name)}" ${ready ? '' : 'disabled'}>Import</button>
+                  ${hint ? `<div class="muted">${esc(hint)}</div>` : ''}</td></tr>`;
+      }).join('') + '</tbody></table>';
+  } catch (e) {
+    $('maps').innerHTML = `<p class="${/no ssh address/.test(e.message) ? 'muted' : 'warning'}">${esc(e.message)}</p>`;
+  }
+}
+
+async function importMap(name, button) {
+  const charger = ($(`charger-${name}`) || {}).value;
+  const clearance = parseFloat(($(`clearance-${name}`) || {}).value) || 0.8;
+  button.disabled = true; button.textContent = 'Importing…';
+  $('import-result').innerHTML = '';
+  try {
+    const r = await api('POST', `${ROBOT}/import`, {name, charger, clearance});
+    const warnings = r.warnings.map((w) => `<div class="warning">⚠ ${esc(w)}</div>`).join('');
+    $('import-result').innerHTML = `<div class="message ok"><b>${esc(name)}</b> imported:
+      ${r.waypoints.length} places, ${r.lanes.length} lanes, charger ${esc(r.charger)}, clearance ${r.options.clearance} m.
+      ${r.active ? 'RMF runs this site, so it restarts on the new version now.' : 'Activate it below to run RMF on it.'}
+      ${warnings}</div>`;
+    await refresh();
+  } catch (e) {
+    $('import-result').innerHTML = `<div class="message bad">Import of <b>${esc(name)}</b> failed: ${esc(e.message)}</div>`;
+  } finally {
+    button.disabled = false; button.textContent = 'Import';
+  }
+}
+
+async function save(change, what) {
+  $('robot-result').innerHTML = '';
+  await api('PATCH', ROBOT, change);
+  $('robot-result').innerHTML = `<div class="message ok">${esc(what)}</div>`;
+  settingsKey = '';
+  await refresh();
+}
+
+onButtons({
+  'refresh-maps': () => refreshMaps(),
+  import: (b, name) => importMap(name, b),
+  activate: async (b, name) => { b.disabled = true; await api('POST', '/api/activate', {name}); await refresh(); },
+  delete: async (b, name) => {
+    if (!confirm(`Delete the site ${name}? The map on the isaacbot stays.`)) return;
+    await api('DELETE', `/api/sites/${encodeURIComponent(name)}`); await refresh();
+  },
+  saveCharger: () => save({charger: $('charger').value}, 'Charger saved; RMF restarts with it now.'),
+  saveSsh: async () => {
+    await save({ssh: $('ssh').value.trim()}, 'SSH address saved.');
+    refreshMaps();
+  },
+  robotPassword: async () => {
+    if (!confirm(`Give ${NAME} a new broker password? It is offline until its balena variable has the new one.`)) return;
+    showCredentials('robot-result', await api('POST', `${ROBOT}/password`), 'has a new password');
+  },
+  robotDelete: async () => {
+    if (!confirm(`Remove ${NAME}? Its broker login stops working and RMF restarts without it.`)) return;
+    await api('DELETE', ROBOT);
+    location.href = '/';
+  },
+});
+
+refresh().then(refreshMaps);
+setInterval(refresh, 3000);
+</script>
+</body>
+</html>

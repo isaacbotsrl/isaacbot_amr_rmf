@@ -69,11 +69,13 @@ resolve() {
 }
 
 # What a restart depends on: the requested name, the imported version of it (if any), the robots.
+# A robot's "ssh" line (where the sites page reads its maps) is not RMF's concern: robots.py
+# writes one field per line, so it is left out here.
 fingerprint() {
     local site
     site="$(requested_site)"
     echo "$site $(stat -c %Y "$SITES_DIR/$site/$site.building.yaml" 2>/dev/null)" \
-        "$(md5sum 2>/dev/null < "$ROBOTS")"
+        "$(grep -v '"ssh"' "$ROBOTS" 2>/dev/null | md5sum)"
 }
 
 # CONFIG with robots.json's robots, when there is a robots.json; CONFIG itself otherwise.

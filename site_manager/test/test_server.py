@@ -53,13 +53,18 @@ def manager(tmp_path):
     maps = tmp_path / 'maps'
     (maps / 'lab').mkdir(parents=True)
     write_map(maps / 'lab')
-    return server.SiteManager(
+    source = DirMapSource(str(maps))
+    manager = server.SiteManager(
         sites_dir=str(tmp_path / 'sites'),
         builtin_maps=os.path.join(REPO, 'isaacbot_amr_rmf_maps', 'maps'),
         template_path=os.path.join(REPO, 'isaacbot_amr_rmf_bringup', 'config',
                                    'fleet_isaacbot_amr_world.yaml'),
-        source=DirMapSource(str(maps)), broker=('192.168.1.201', 1883),
-        nav_graph_cmd=FAKE_NAV_GRAPH, clock=Clock())
+        # A robot's maps come from its ssh address; here every address reads the test maps.
+        source_for=lambda robot: source if robot.ssh else None,
+        broker=('192.168.1.201', 1883), nav_graph_cmd=FAKE_NAV_GRAPH, clock=Clock(),
+        default_ssh='root@192.168.1.201:24')
+    manager.test_source = source
+    return manager
 
 
 def test_builtin_sites_are_listed(manager):
@@ -70,7 +75,7 @@ def test_builtin_sites_are_listed(manager):
 
 
 def test_import_writes_a_complete_site(manager):
-    summary = manager.import_map({'name': 'lab', 'charger': 'dock', 'clearance': 0.3})
+    summary = manager.import_map('ardennes', {'name': 'lab', 'charger': 'dock', 'clearance': 0.3})
     assert summary['charger'] == 'dock' and len(summary['waypoints']) == 5
     site_dir = os.path.join(manager.sites_dir, 'lab')
     assert sorted(os.listdir(site_dir)) == [
@@ -87,29 +92,29 @@ def test_import_writes_a_complete_site(manager):
 
 def test_import_errors_are_request_errors(manager):
     with pytest.raises(server.MapImportError, match="no place named 'charger'"):
-        manager.import_map({'name': 'lab', 'charger': 'charger', 'clearance': 0.3})
+        manager.import_map('ardennes', {'name': 'lab', 'charger': 'charger', 'clearance': 0.3})
     with pytest.raises(server.MapImportError, match="no map named 'nope'"):
-        manager.import_map({'name': 'nope'})
+        manager.import_map('ardennes', {'name': 'nope'})
     with pytest.raises(server.RequestError, match='not a map name'):
-        manager.import_map({'name': '../etc'})
+        manager.import_map('ardennes', {'name': '../etc'})
     with pytest.raises(server.RequestError, match='Gazebo site'):
-        manager.import_map({'name': 'isaacbot_amr_world'})
+        manager.import_map('ardennes', {'name': 'isaacbot_amr_world'})
     with pytest.raises(server.RequestError, match='must be > 0'):
-        manager.import_map({'name': 'lab', 'charger': 'dock', 'clearance': 0})
+        manager.import_map('ardennes', {'name': 'lab', 'charger': 'dock', 'clearance': 0})
 
 
 def test_failed_reimport_keeps_the_previous_site(manager):
-    manager.import_map({'name': 'lab', 'charger': 'dock', 'clearance': 0.3})
+    manager.import_map('ardennes', {'name': 'lab', 'charger': 'dock', 'clearance': 0.3})
     manager.nav_graph_cmd = FAILING_NAV_GRAPH
     with pytest.raises(server.MapImportError, match='no lanes'):
-        manager.import_map({'name': 'lab', 'charger': 'dock', 'clearance': 0.3})
+        manager.import_map('ardennes', {'name': 'lab', 'charger': 'dock', 'clearance': 0.3})
     site_dir = os.path.join(manager.sites_dir, 'lab')
     assert os.path.isfile(os.path.join(site_dir, 'nav_graphs', '0.yaml'))
     assert not any(n.startswith('.') for n in os.listdir(manager.sites_dir) if n != 'lab')
 
 
 def test_activate_and_delete(manager):
-    manager.import_map({'name': 'lab', 'charger': 'dock', 'clearance': 0.3})
+    manager.import_map('ardennes', {'name': 'lab', 'charger': 'dock', 'clearance': 0.3})
     assert manager.activate({'name': 'lab'}) == {'active': 'lab'}
     with open(os.path.join(manager.sites_dir, 'active')) as f:
         assert f.read() == 'lab\n'
@@ -123,14 +128,19 @@ def test_activate_and_delete(manager):
         manager.activate({'name': 'lab'})
 
 
-def test_isaacbot_amr_access_is_checked_at_most_every_15_s(manager):
+def test_robot_access_is_checked_at_most_every_15_s(manager):
     calls = []
-    manager.source.check = lambda: calls.append(1) or ('ok', '')
-    manager.access()
-    manager.access()
+    manager.test_source.check = lambda: calls.append(1) or ('ok', '')
+    robot = manager._robot('ardennes')
+    manager.access(robot)
+    manager.access(robot)
     manager.clock.now += 16
-    manager.access()
+    assert manager.access(robot)['state'] == 'ok'
     assert len(calls) == 2
+    # A new address is checked at once.
+    manager.update_robot('ardennes', {'ssh': 'root@10.0.0.9'})
+    manager.access(manager._robot('ardennes'))
+    assert len(calls) == 3
 
 
 @pytest.fixture
@@ -156,25 +166,40 @@ def request(url, method='GET', body=None):
 
 def test_http_end_to_end(http):
     code, kind, body = request(f'{http}/')
-    assert code == 200 and kind.startswith('text/html') and b'RMF sites' in body
+    assert code == 200 and kind.startswith('text/html') and b'RMF robots' in body
 
-    code, _, body = request(f'{http}/api/isaacbot/maps')
+    code, kind, body = request(f'{http}/robots/ardennes')
+    assert code == 200 and kind.startswith('text/html') and b'Maps on this robot' in body
+    code, kind, body = request(f'{http}/common.js')
+    assert code == 200 and kind.startswith('text/javascript') and b'function api' in body
+    assert request(f'{http}/common.css')[0] == 200
+
+    code, _, body = request(f'{http}/api/robots/ardennes')
+    robot = json.loads(body)
+    assert code == 200 and robot['access']['state'] == 'ok'
+    assert robot['authorize'] == ('docker compose -f docker/docker-compose.yml exec site-manager '
+                                  'isaacbot-authorize root@192.168.1.201 24')
+
+    code, _, body = request(f'{http}/api/robots/ardennes/maps')
     assert code == 200 and json.loads(body)[0]['name'] == 'lab'
 
-    code, _, body = request(f'{http}/api/import', 'POST', {'name': 'lab', 'clearance': 0.3})
+    code, _, body = request(f'{http}/api/robots/ardennes/import', 'POST',
+                            {'name': 'lab', 'clearance': 0.3})
     assert code == 200 and json.loads(body)['charger'] == 'dock'
+    assert json.loads(body)['robot'] == 'ardennes'
 
     code, kind, body = request(f'{http}/sites/lab/preview.png')
     assert code == 200 and kind == 'image/png' and body[:4] == b'\x89PNG'
     code, _, _ = request(f'{http}/sites/isaacbot_amr_world/floorplan.png')
     assert code == 200
 
-    code, _, body = request(f'{http}/api/import', 'POST', {'name': 'lab', 'charger': 'x'})
+    code, _, body = request(f'{http}/api/robots/ardennes/import', 'POST',
+                            {'name': 'lab', 'charger': 'x'})
     assert code == 400 and "no place named 'x'" in json.loads(body)['error']
 
     assert request(f'{http}/api/activate', 'POST', {'name': 'lab'})[0] == 200
     status = json.loads(request(f'{http}/api/status')[2])
-    assert status['active'] == 'lab' and status['access']['state'] == 'ok'
+    assert status['active'] == 'lab' and 'access' not in status
     assert {s['name'] for s in status['sites']} >= {'lab', 'isaacbot_amr_world'}
 
     assert request(f'{http}/api/sites/lab', 'DELETE')[0] == 400      # active
@@ -183,6 +208,10 @@ def test_http_end_to_end(http):
     assert request(f'{http}/server.py')[0] == 404
     assert request(f'{http}/sites/..%2F..%2Fetc/preview.png')[0] == 404
     assert request(f'{http}/api/nothing')[0] == 404
+    # The single-robot routes are gone: maps and imports are per robot.
+    assert request(f'{http}/api/isaacbot/maps')[0] == 404
+    assert request(f'{http}/api/import', 'POST', {'name': 'lab'})[0] == 404
+    assert request(f'{http}/robots/ardennes/../../server.py')[0] == 404
 
 
 # --- robots ---------------------------------------------------------------------------------------
@@ -325,3 +354,53 @@ def test_http_basic_auth(manager):
         assert e.value.code == 401
     finally:
         httpd.shutdown()
+
+
+# --- one robot's page ------------------------------------------------------------------------------
+
+def rmf_fingerprint(path):
+    """What run_rmf.sh restarts RMF on: robots.json without its "ssh" lines."""
+    with open(path) as f:
+        return [line for line in f if '"ssh"' not in line]
+
+
+def test_robot_page_data(manager):
+    robot = manager.robot('ardennes')
+    assert robot['ssh'] == 'root@192.168.1.201:24' and robot['access']['state'] == 'ok'
+    assert robot['site'] == 'isaacbot_amr_world' and 'ardennes_charger' in robot['waypoints']
+    assert robot['authorize'].endswith('isaacbot-authorize root@192.168.1.201 24')
+    with pytest.raises(server.RobotNotFound):
+        manager.robot('nobody')
+
+
+def test_update_ssh_does_not_restart_rmf_but_charger_does(manager):
+    before = rmf_fingerprint(manager.robots_path)
+    assert manager.update_robot('ardennes', {'ssh': 'root@10.0.0.9:2222'})['ssh'] == \
+        'root@10.0.0.9:2222'
+    assert manager._robot('ardennes').ssh_target() == ('root@10.0.0.9', 2222)
+    assert rmf_fingerprint(manager.robots_path) == before
+    manager.update_robot('ardennes', {'charger': 'south'})
+    assert rmf_fingerprint(manager.robots_path) != before
+    with pytest.raises(server.RobotError, match='not an ssh address'):
+        manager.update_robot('ardennes', {'ssh': 'no-user-here'})
+    with pytest.raises(server.RobotError, match='not a waypoint'):
+        manager.update_robot('ardennes', {'charger': 'nowhere'})
+    with pytest.raises(server.RequestError, match='nothing to change'):
+        manager.update_robot('ardennes', {'serial_number': 'x'})
+
+
+def test_robot_without_ssh_has_no_maps(manager):
+    manager.add_robot({'name': 'sim', 'serial_number': 'sim-1'})
+    assert manager.robot('sim')['access']['state'] == 'no_ssh'
+    assert manager.robot('sim')['authorize'] == ''
+    with pytest.raises(server.RequestError, match='no ssh address'):
+        manager.robot_maps('sim')
+    with pytest.raises(server.RequestError, match='no ssh address'):
+        manager.import_map('sim', {'name': 'lab', 'charger': 'dock'})
+
+
+def test_http_patch_robot(http):
+    code, _, body = request(f'{http}/api/robots/ardennes', 'PATCH', {'ssh': 'root@10.0.0.9'})
+    assert code == 200 and json.loads(body)['ssh'] == 'root@10.0.0.9'
+    assert request(f'{http}/api/robots/ardennes', 'PATCH', {'ssh': 'bad'})[0] == 400
+    assert request(f'{http}/api/robots/nobody', 'PATCH', {'ssh': 'root@h'})[0] == 404

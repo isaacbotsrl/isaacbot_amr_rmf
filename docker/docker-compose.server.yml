@@ -77,6 +77,8 @@ services:
       BROKER_AUTH_DIR: /broker
       ROBOT_BROKER: ${RMF_BIND_IP:-10.8.0.1}:1883
       SITE_MANAGER_PASSWORD: ${SITE_MANAGER_PASSWORD:-}
+      # The isaacbot-authorize command each robot page shows (run in src/isaacbot_amr_rmf).
+      AUTHORIZE_CMD: docker/rmf-server.sh exec site-manager
     volumes:
       - broker-auth:/broker
     ports: !override

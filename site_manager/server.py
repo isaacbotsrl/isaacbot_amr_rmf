@@ -14,13 +14,15 @@
 # limitations under the License.
 
 """
-RMF site manager: a small web page that turns maps saved on the isaacbot into RMF sites.
+RMF site manager: a small web page for the fleet's robots and the RMF sites made from their maps.
 
-    http://localhost:8020
+    http://localhost:8020              the robots
+    http://localhost:8020/robots/<n>   one robot: its ssh access, its saved maps, the RMF sites
 
-It lists the maps isaacbot_amr_indoor_nav_manager saved on the isaacbot. Import turns one into a site in
-the rmf-sites volume: floor plan, building, nav graph, fleet config and a preview with the
-lanes. Activate writes the site's name to <sites>/active; docker/run_rmf.sh, which runs RMF,
+A robot page lists the maps isaacbot_amr_indoor_nav_manager saved on that isaacbot (over ssh, at the
+robot's own address; the page's one key is installed on each robot with isaacbot-authorize).
+Import turns one into a site in the rmf-sites volume: floor plan, building, nav graph, fleet
+config and a preview with the lanes. RMF runs one site for the whole fleet. Activate writes the site's name to <sites>/active; docker/run_rmf.sh, which runs RMF,
 restarts RMF on it. Built-in sites (isaacbot_amr_world, and CLI imports in isaacbot_amr_rmf_maps) can be
 activated too.
 
@@ -33,10 +35,13 @@ Environment:
     SITES_DIR       the rmf-sites volume (default /sites)
     BUILTIN_MAPS    isaacbot_amr_rmf_maps' installed maps directory
     FLEET_TEMPLATE  fleet config the imported sites copy (fleet_isaacbot_amr_world.yaml)
-    ISAACBOT_AMR_SSH       user@host of the isaacbot's orchestrator sshd (default root@192.168.1.201)
+    ISAACBOT_AMR_SSH       user@host of the isaacbot's orchestrator sshd (default root@192.168.1.201):
+                           the ssh address of robots seeded from the fleet template
     ISAACBOT_AMR_SSH_PORT  default 24
+    AUTHORIZE_CMD   what runs a command in this container, for the isaacbot-authorize command the
+                    page shows (default: docker compose -f docker/docker-compose.yml exec site-manager)
     ISAACBOT_AMR_BROKER    host[:port] written into imported sites (default the ISAACBOT_AMR_SSH host, 1883)
-    MAPS_DIR        read maps from this directory instead of ssh (the sim's --maps-dir)
+    MAPS_DIR        read every robot's maps from this directory instead of ssh (the sim's --maps-dir)
     BROKER_AUTH_DIR Mosquitto password file + ACL to manage (the broker-auth volume); unset: the
                     broker is anonymous (local compose) and robots get no login
     ROBOT_BROKER    host[:port] the isaacbots reach the broker on, for the balena variables
@@ -80,6 +85,7 @@ import yaml  # noqa: E402
 
 NAME = re.compile(r'[A-Za-z0-9_-]{1,64}')
 NAV_GRAPH_CMD = ('ros2', 'run', 'rmf_building_map_tools', 'building_map_generator', 'nav')
+DEFAULT_AUTHORIZE_CMD = 'docker compose -f docker/docker-compose.yml exec site-manager'
 
 
 class RequestError(ValueError):
@@ -94,16 +100,26 @@ def _valid_name(name: str) -> str:
 
 class SiteManager:
 
-    def __init__(self, sites_dir: str, builtin_maps: str, template_path: str, source,
+    def __init__(self, sites_dir: str, builtin_maps: str, template_path: str,
+                 source_for: Callable[[Robot], object],
                  broker: tuple, nav_graph_cmd: Sequence[str] = NAV_GRAPH_CMD,
                  clock: Callable[[], float] = time.time,
                  broker_auth: Optional[fleet_robots.BrokerAuth] = None,
                  robot_broker: Optional[tuple] = None,
-                 fleet_state: Optional[Callable[[], dict]] = None):
+                 fleet_state: Optional[Callable[[], dict]] = None,
+                 default_ssh: str = '', authorize_cmd: str = DEFAULT_AUTHORIZE_CMD):
+        """
+        source_for(robot): where that robot's saved maps are read from (an SshMapSource, a
+        DirMapSource for the simulation), or None when it has none. default_ssh: the ssh address
+        robots seeded from the fleet template get. authorize_cmd: what runs isaacbot-authorize
+        in the site-manager container, for the command the page shows.
+        """
         self.sites_dir = sites_dir
         self.builtin_maps = builtin_maps
         self.template_path = template_path
-        self.source = source
+        self.source_for = source_for
+        self.default_ssh = default_ssh
+        self.authorize_cmd = authorize_cmd
         self.broker = broker
         self.nav_graph_cmd = list(nav_graph_cmd)
         self.clock = clock
@@ -112,7 +128,7 @@ class SiteManager:
         self.fleet_state = fleet_state or (lambda: {})
         self.robots_path = os.path.join(sites_dir, 'robots.json')
         self._lock = threading.Lock()          # one import/activate/delete at a time
-        self._access = ('unknown', '', 0.0)    # cached isaacbot access check
+        self._access = {}                      # robot -> (ssh, state, detail, checked)
         os.makedirs(sites_dir, exist_ok=True)
         self._seed_robots()
 
@@ -174,24 +190,34 @@ class SiteManager:
         except (OSError, ValueError):
             return {}
 
-    def access(self, max_age: float = 15.0) -> dict:
-        state, detail, checked = self._access
-        if self.clock() - checked > max_age:
-            state, detail = self.source.check()
-            self._access = (state, detail, self.clock())
-        return {'state': state, 'detail': detail, 'source': self.source.describe()}
+    def access(self, robot: Robot, max_age: float = 15.0) -> dict:
+        """Can the page read this robot's maps (cached max_age s per robot and address)."""
+        source = self.source_for(robot)
+        if source is None:
+            return {'state': 'no_ssh', 'detail': '', 'source': ''}
+        ssh, state, detail, checked = self._access.get(robot.name, ('', 'unknown', '', -1e9))
+        if ssh != robot.ssh or self.clock() - checked > max_age:
+            state, detail = source.check()
+            self._access[robot.name] = (robot.ssh, state, detail, self.clock())
+        return {'state': state, 'detail': detail, 'source': source.describe()}
 
     def status(self) -> dict:
         return {'active': self.active(), 'rmf': self.rmf_status(), 'sites': self.sites(),
-                'access': self.access(), 'public_key': public_key(),
                 'broker': f'{self.broker[0]}:{self.broker[1]}'}
 
-    def isaacbot_amr_maps(self) -> list:
-        return self.source.list_maps()
+    def _source(self, robot: Robot):
+        source = self.source_for(robot)
+        if source is None:
+            raise RequestError(f'{robot.name} has no ssh address: set one to read its maps')
+        return source
+
+    def robot_maps(self, name: str) -> list:
+        return self._source(self._robot(name)).list_maps()
 
     # --- actions ---------------------------------------------------------------------------
 
-    def import_map(self, request: dict) -> dict:
+    def import_map(self, robot_name: str, request: dict) -> dict:
+        source = self._source(self._robot(robot_name))
         name = _valid_name(request.get('name'))
         if name == 'isaacbot_amr_world':
             raise RequestError('isaacbot_amr_world is the Gazebo site; save the map under another name')
@@ -206,7 +232,7 @@ class SiteManager:
             raise RequestError('clearance and max_lane must be > 0, neighbours >= 0')
 
         with self._lock, tempfile.TemporaryDirectory() as tmp:
-            map_dir = self.source.fetch(name, tmp)
+            map_dir = source.fetch(name, tmp)
             site = import_site(name, map_dir, charger, clearance, max_lane, neighbours)
             # Build the new site next to the old one, swap only once the nav graph exists: a
             # failed import leaves the previous version (maybe the one RMF runs) intact.
@@ -219,7 +245,7 @@ class SiteManager:
                 raise
             summary = {
                 'name': name, 'charger': charger_name, 'imported': self.clock(),
-                'source': self.source.describe(),
+                'robot': robot_name, 'source': source.describe(),
                 'size_px': [site.width, site.height], 'resolution': site.resolution,
                 'translation': list(site.translation),
                 'waypoints': [w.name for w in site.waypoints],
@@ -297,7 +323,8 @@ class SiteManager:
                 template = yaml.safe_load(f) or {}
         except OSError:
             return
-        fleet_robots.save(self.robots_path, fleet_robots.from_fleet_config(template))
+        fleet_robots.save(self.robots_path,
+                          fleet_robots.from_fleet_config(template, ssh=self.default_ssh))
 
     def _robot_list(self) -> list:
         return fleet_robots.load(self.robots_path) or []
@@ -325,6 +352,41 @@ class SiteManager:
                 'site': site.get('name'), 'waypoints': site.get('waypoints') or [],
                 'site_charger': site.get('charger')}
 
+    def _robot(self, name: str) -> Robot:
+        return self._find(self._robot_list(), name)
+
+    def robot(self, name: str) -> dict:
+        """One robot's page: identity, live state, settings, and whether its maps are readable."""
+        robot = self._robot(name)
+        fleet = self.robots()
+        entry = next(r for r in fleet['robots'] if r['name'] == name)
+        target = robot.ssh_target()
+        entry.update(
+            access=self.access(robot), public_key=public_key(),
+            authorize=(f'{self.authorize_cmd} isaacbot-authorize {target[0]} {target[1]}'
+                       if target else ''),
+            broker_auth=fleet['broker_auth'], broker=fleet['broker'], site=fleet['site'],
+            waypoints=fleet['waypoints'], site_charger=fleet['site_charger'])
+        return entry
+
+    def update_robot(self, name: str, request: dict) -> dict:
+        """Change a robot's charger and/or ssh address (its identity and login stay)."""
+        changes = {k: request[k].strip() for k in ('charger', 'ssh')
+                   if isinstance(request.get(k), str)}
+        if not changes:
+            raise RequestError('nothing to change: send charger and/or ssh')
+        waypoints = (self._active_site() or {}).get('waypoints')
+        if changes.get('charger') and waypoints and changes['charger'] not in waypoints:
+            raise RobotError(f'{changes["charger"]!r} is not a waypoint of the active site')
+        with self._lock:
+            robots = self._robot_list()
+            robot = self._find(robots, name)
+            updated = fleet_robots.validate(replace(robot, **changes))
+            fleet_robots.save(self.robots_path,
+                              [updated if r.name == name else r for r in robots])
+        self._access.pop(name, None)
+        return asdict(updated)
+
     def add_robot(self, request: dict) -> dict:
         def field(key: str, default: str = '') -> str:
             value = request.get(key, default)
@@ -332,7 +394,7 @@ class SiteManager:
 
         robot = Robot(name=field('name'), serial_number=field('serial_number'),
                       manufacturer=field('manufacturer') or fleet_robots.DEFAULT_MANUFACTURER,
-                      login=field('login'), charger=field('charger'))
+                      login=field('login'), charger=field('charger'), ssh=field('ssh'))
         reserved = (self.broker_auth.master_login,) if self.broker_auth else ()
         fleet_robots.validate(robot, reserved)
         waypoints = (self._active_site() or {}).get('waypoints')
@@ -438,7 +500,10 @@ def ensure_key() -> None:
 
 # --- HTTP ---------------------------------------------------------------------------------------
 
-BRAND_ICONS = ('/isaacbot-mark-black.svg', '/isaacbot-mark-white.svg')
+# The only static files served, besides the two pages: no path from a request reaches the disk.
+STATIC = {'/isaacbot-mark-black.svg': 'image/svg+xml', '/isaacbot-mark-white.svg': 'image/svg+xml',
+          '/common.js': 'text/javascript; charset=utf-8', '/common.css': 'text/css; charset=utf-8'}
+ROBOT_PATH = re.compile(r'/api/robots/([^/]+)')
 
 
 def make_handler(manager: SiteManager, static_dir: str, password: str = ''):
@@ -449,6 +514,7 @@ def make_handler(manager: SiteManager, static_dir: str, password: str = ''):
 
         def log_message(self, fmt, *args):
             if not self.path.startswith(('/api/status', '/api/robots')) or 'GET' not in fmt % args:
+                # (the pages poll those every 3 s)
                 sys.stderr.write('site-manager: ' + fmt % args + '\n')
 
         def _authorized(self) -> bool:
@@ -501,23 +567,30 @@ def make_handler(manager: SiteManager, static_dir: str, password: str = ''):
                 raise RequestError('the request body must be a JSON object')
             return data
 
+        def _page(self, name: str):
+            with open(os.path.join(static_dir, name), 'rb') as f:
+                self._send(200, f.read(), 'text/html; charset=utf-8')
+
         def do_GET(self):  # noqa: N802
             if not self._authorized():
                 return
             path = unquote(self.path.split('?')[0])
             if path in ('/', '/index.html'):
-                with open(os.path.join(static_dir, 'index.html'), 'rb') as f:
-                    return self._send(200, f.read(), 'text/html; charset=utf-8')
-            if path in BRAND_ICONS:
-                # Only the fixed brand marks: no path from the request reaches the disk.
+                return self._page('index.html')
+            if re.fullmatch(r'/robots/[^/]+', path):
+                return self._page('robot.html')       # the page reads the name from its URL
+            if path in STATIC:
                 with open(os.path.join(static_dir, path[1:]), 'rb') as f:
-                    return self._send(200, f.read(), 'image/svg+xml')
+                    return self._send(200, f.read(), STATIC[path])
             if path == '/api/status':
                 return self._call(manager.status)
-            if path == '/api/isaacbot/maps':
-                return self._call(manager.isaacbot_amr_maps)
             if path == '/api/robots':
                 return self._call(manager.robots)
+            match = re.fullmatch(r'/api/robots/([^/]+)(/maps)?', path)
+            if match:
+                if match.group(2):
+                    return self._call(lambda: manager.robot_maps(match.group(1)))
+                return self._call(lambda: manager.robot(match.group(1)))
             match = re.fullmatch(r'/sites/([^/]+)/(preview|floorplan)\.png', path)
             if match:
                 try:
@@ -532,15 +605,23 @@ def make_handler(manager: SiteManager, static_dir: str, password: str = ''):
         def do_POST(self):  # noqa: N802
             if not self._authorized():
                 return
-            if self.path == '/api/import':
-                return self._call(lambda: manager.import_map(self._body()))
             if self.path == '/api/activate':
                 return self._call(lambda: manager.activate(self._body()))
             if self.path == '/api/robots':
                 return self._call(lambda: manager.add_robot(self._body()))
-            match = re.fullmatch(r'/api/robots/([^/]+)/password', unquote(self.path))
-            if match:
+            match = re.fullmatch(r'/api/robots/([^/]+)/(password|import)', unquote(self.path))
+            if match and match.group(2) == 'password':
                 return self._call(lambda: manager.rotate_password(match.group(1)))
+            if match:
+                return self._call(lambda: manager.import_map(match.group(1), self._body()))
+            self._json(404, {'error': 'not found'})
+
+        def do_PATCH(self):  # noqa: N802
+            if not self._authorized():
+                return
+            match = ROBOT_PATH.fullmatch(unquote(self.path))
+            if match:
+                return self._call(lambda: manager.update_robot(match.group(1), self._body()))
             self._json(404, {'error': 'not found'})
 
         def do_DELETE(self):  # noqa: N802
@@ -559,14 +640,22 @@ def make_handler(manager: SiteManager, static_dir: str, password: str = ''):
 
 def main():
     ssh_target = os.environ.get('ISAACBOT_AMR_SSH', 'root@192.168.1.201')
+    ssh_port = os.environ.get('ISAACBOT_AMR_SSH_PORT', '24')
     host = ssh_target.split('@')[-1]
     broker = os.environ.get('ISAACBOT_AMR_BROKER', f'{host}:1883')
     broker_host, _, broker_port = broker.partition(':')
     if os.environ.get('MAPS_DIR'):
-        source = DirMapSource(os.environ['MAPS_DIR'])
+        # The simulation: every robot's maps are this directory.
+        maps_dir = DirMapSource(os.environ['MAPS_DIR'])
+        source_for = lambda robot: maps_dir  # noqa: E731
+        describe = maps_dir.describe()
     else:
         ensure_key()
-        source = SshMapSource(ssh_target, int(os.environ.get('ISAACBOT_AMR_SSH_PORT', '24')))
+
+        def source_for(robot):
+            target = robot.ssh_target()
+            return SshMapSource(*target) if target else None
+        describe = "each robot's ssh address"
     robot_host, _, robot_port = os.environ.get('ROBOT_BROKER', broker).partition(':')
     auth_dir = os.environ.get('BROKER_AUTH_DIR', '')
     manager = SiteManager(
@@ -577,7 +666,9 @@ def main():
             'FLEET_TEMPLATE',
             '/rmf_ws/install/isaacbot_amr_rmf_bringup/share/isaacbot_amr_rmf_bringup/config/'
             'fleet_isaacbot_amr_world.yaml'),
-        source=source, broker=(broker_host, int(broker_port or 1883)),
+        source_for=source_for, broker=(broker_host, int(broker_port or 1883)),
+        default_ssh=f'{ssh_target}:{ssh_port}',
+        authorize_cmd=os.environ.get('AUTHORIZE_CMD', DEFAULT_AUTHORIZE_CMD),
         broker_auth=fleet_robots.BrokerAuth(auth_dir) if auth_dir else None,
         robot_broker=(robot_host, int(robot_port or 1883)),
         fleet_state=fleet_api_state(os.environ.get('FLEET_API', 'http://rmf:8030')))
@@ -585,7 +676,7 @@ def main():
     password = os.environ.get('SITE_MANAGER_PASSWORD', '')
     server = ThreadingHTTPServer(('0.0.0.0', port),
                                  make_handler(manager, os.path.join(HERE, 'static'), password))
-    print(f'RMF site manager on :{port}; maps from {source.describe()}, sites in '
+    print(f'RMF site manager on :{port}; maps from {describe}, sites in '
           f'{manager.sites_dir}; broker logins '
           f'{"managed in " + auth_dir if auth_dir else "off (anonymous broker)"}; '
           f'{"password protected" if password else "no password"}', flush=True)

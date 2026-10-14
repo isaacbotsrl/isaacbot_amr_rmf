@@ -158,3 +158,27 @@ def test_site_waypoints():
     names = robots.site_waypoints(WORLD)
     assert 'ardennes_charger' in names and len(names) == 9
     assert robots.site_waypoints('/nonexistent.yaml') is None
+
+
+def test_ssh_address():
+    assert Robot('a', 's', ssh='root@192.168.1.201').ssh_target() == ('root@192.168.1.201', 24)
+    assert Robot('a', 's', ssh='root@10.0.0.2:2222').ssh_target() == ('root@10.0.0.2', 2222)
+    assert Robot('a', 's').ssh_target() is None
+    for bad in ('192.168.1.201', 'root@', 'root@host:', 'root@host:99999', 'a b@host'):
+        with pytest.raises(robots.RobotError, match='ssh address'):
+            robots.validate(Robot('a', 's', ssh=bad))
+
+
+def test_robots_json_one_field_per_line_and_old_files_load(tmp_path):
+    """run_rmf.sh drops the "ssh" lines to fingerprint robots.json: one field per line."""
+    path = str(tmp_path / 'robots.json')
+    robots.save(path, [Robot('a', 's', ssh='root@h:24')])
+    ssh_lines = [line for line in open(path) if '"ssh"' in line]
+    assert ssh_lines == ['   "ssh": "root@h:24"\n']
+    (tmp_path / 'old.json').write_text('{"robots": [{"name": "a", "serial_number": "s"}]}')
+    assert robots.load(str(tmp_path / 'old.json')) == [Robot('a', 's')]
+
+
+def test_merge_ignores_ssh():
+    config = robots.apply_to_fleet(template(), [Robot('ardennes', 'k', ssh='root@h')])
+    assert 'ssh' not in yaml.safe_dump(config)

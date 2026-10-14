@@ -13,17 +13,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# Lets the RMF site manager read the isaacbot's maps: installs its ssh key on the isaacbot's
+# Lets the RMF site manager read an isaacbot's maps: installs its ssh key on that isaacbot's
 # orchestrator container. Asks for the isaacbot's root password once.
 #
-#   docker compose -f docker/docker-compose.yml exec site-manager isaacbot-authorize
+#   docker compose -f docker/docker-compose.yml exec site-manager isaacbot-authorize [user@host [port]]
+#   docker/rmf-server.sh exec site-manager isaacbot-authorize [user@host [port]]     (server)
+#
+# Each robot's page on the sites page shows the command for that robot. Without arguments:
+# ISAACBOT_AMR_SSH / ISAACBOT_AMR_SSH_PORT (root@192.168.1.201, 24). The page has one key; each
+# robot gets it once.
 #
 # The key stays in the site-manager-ssh volume. The isaacbot forgets it when its orchestrator
 # container is recreated (a new release); run this again then. The new container also has new
 # ssh host keys: this shows the new fingerprint and, once confirmed, forgets the old one.
 set -e
-TARGET="${ISAACBOT_AMR_SSH:-root@192.168.1.201}"
-PORT="${ISAACBOT_AMR_SSH_PORT:-24}"
+TARGET="${1:-${ISAACBOT_AMR_SSH:-root@192.168.1.201}}"
+PORT="${2:-${ISAACBOT_AMR_SSH_PORT:-24}}"
 HOST="${TARGET#*@}"
 KEY="$HOME/.ssh/id_ed25519"
 [ -f "$KEY" ] || ssh-keygen -q -t ed25519 -N '' -C isaacbot-rmf-site-manager -f "$KEY"
