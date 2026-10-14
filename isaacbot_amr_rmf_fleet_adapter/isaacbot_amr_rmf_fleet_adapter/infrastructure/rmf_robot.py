@@ -41,6 +41,7 @@ class RmfRobot(RmfCommands):
         self._refused_map: Optional[str] = None
         # Wanted before the robot registered: applied once it has.
         self._in_fleet: Optional[bool] = None
+        self._commission_pending = False
         self._offline = False
 
     def attach(self, session: RobotSession) -> None:
@@ -69,10 +70,17 @@ class RmfRobot(RmfCommands):
         more = self._update_handle.more()
         # The binding has no Commission constructor: change the robot's current one.
         commission = more.commission()
+        if commission is None:
+            # add_robot finishes registering the robot asynchronously: right after it, the
+            # robot has no commission yet. Retry on the next update (an out-of-fleet isaacbot
+            # must not keep RMF's default, which accepts tasks).
+            self._commission_pending = True
+            return
         commission.accept_dispatched_tasks = self._in_fleet
         commission.accept_direct_tasks = self._in_fleet
         commission.perform_idle_behavior = self._in_fleet
         more.set_commission(commission)
+        self._commission_pending = False
 
     def _apply_status(self) -> None:
         if self._update_handle is not None:
@@ -110,6 +118,8 @@ class RmfRobot(RmfCommands):
             self._log.info(f'[{self._name}] registered with RMF on {state.map_name} at '
                            f'({state.position[0]:.2f}, {state.position[1]:.2f})')
             return
+        if self._commission_pending:
+            self._apply_commission()
         execution = self._session.execution
         activity = execution.identifier if execution is not None else None
         self._update_handle.update(rmf_state, activity)
