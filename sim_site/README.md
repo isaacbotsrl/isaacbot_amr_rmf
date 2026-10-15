@@ -33,7 +33,7 @@ does not cover navigation, map import, or the site manager reading maps from the
 
 2. **Make the site's WireGuard peer.** This is done on the server and needs sudo:
    ```bash
-   ssh -t rover-a1-server@10.8.0.1 'cd wireguard && sudo ./wg-add-client.sh rutx-11-sim split'
+   ssh -t isaacbot-server-001@10.8.0.1 'cd wireguard && sudo ./wg-add-client.sh rutx-11-sim split'
    ```
    It takes the lowest free address (10.8.0.6 while .2–.5 are used) and prints the client
    config. Save that config as `sim_site/secrets/wg0.conf`.
@@ -66,7 +66,7 @@ does not cover navigation, map import, or the site manager reading maps from the
 
 ```bash
 docker compose -f sim_site/docker-compose.yml down
-ssh -t rover-a1-server@10.8.0.1 'cd wireguard && sudo ./wg-remove-client.sh rutx-11-sim'
+ssh -t isaacbot-server-001@10.8.0.1 'cd wireguard && sudo ./wg-remove-client.sh rutx-11-sim'
 ```
 
 Then remove `ardennes_e` on the sites page: its login stops working and RMF restarts without it.

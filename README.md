@@ -272,7 +272,7 @@ refuses tasks that use the new action ("Fleet not configured to perform this act
 
 ## Server deployment (WireGuard)
 
-For permanent use, RMF and the fleet's MQTT broker run on a server: `rover-a1-server`, reached at
+For permanent use, RMF and the fleet's MQTT broker run on a server: `isaacbot-server-001`, reached at
 `10.8.0.1` over WireGuard. The isaacbot's connector dials out to that broker, so RMF keeps working
 while the laptop is off. Every port is published on the WireGuard address only.
 
