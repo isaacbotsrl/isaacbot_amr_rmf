@@ -116,20 +116,20 @@ positions.
 Terminal 1, Gazebo:
 
 ```bash
-~/ros2_ws/ardennes/src/isaacbot_amr_ros/isaacbot_amr_gazebo/scripts/isaacbot_amr_sim.sh
+~/ros2_ws/src/isaacbot_amr_ros/isaacbot_amr_gazebo/scripts/isaacbot_amr_sim.sh
 ```
 
 Terminal 2, RMF (Docker Desktop):
 
 ```bash
-cd ~/ros2_ws/ardennes/src/isaacbot_amr_rmf
+cd ~/ros2_ws/src/isaacbot_amr_rmf
 docker compose -f docker/docker-compose.yml up --build
 ```
 
 Terminal 3, the isaacbot stack:
 
 ```bash
-~/ros2_ws/ardennes/src/isaacbot_amr_rmf/scripts/start_sim_isaacbot.sh
+~/ros2_ws/src/isaacbot_amr_rmf/scripts/start_sim_isaacbot.sh
 ```
 
 Then:
