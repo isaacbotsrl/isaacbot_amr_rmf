@@ -63,7 +63,7 @@ const NAME = decodeURIComponent(location.pathname.split('/')[2] || '');
 const ROBOT = `/api/robots/${encodeURIComponent(NAME)}`;
 siteChrome('robots');
 $('title').textContent = NAME;
-document.title = `${NAME} · RMF robots`;
+document.title = `${NAME} · Isaacbot Fleets`;
 let robot = null, settingsKey = '';
 
 function renderFacts(r) {

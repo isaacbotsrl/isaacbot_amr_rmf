@@ -166,7 +166,7 @@ def request(url, method='GET', body=None):
 
 def test_http_end_to_end(http):
     code, kind, body = request(f'{http}/')
-    assert code == 200 and kind.startswith('text/html') and b'RMF robots' in body
+    assert code == 200 and kind.startswith('text/html') and b'Isaacbot Fleets' in body
 
     code, kind, body = request(f'{http}/robots/ardennes')
     assert code == 200 and kind.startswith('text/html') and b'Maps on this robot' in body
