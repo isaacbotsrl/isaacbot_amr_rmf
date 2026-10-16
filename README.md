@@ -212,7 +212,7 @@ drive UI, and that map becomes the RMF site.
    appears at `dock` on the `lab` map. Start with a patrol between two places.
 
 Sites imported on the page live in the `rmf-sites` Docker volume. The CLI,
-`scripts/import_isaacbot_amr_map.py lab --from-isaacbot root@192.168.1.201`, does the same import into
+`scripts/import_isaacbot_amr_map.py lab --from-isaacbot root@<isaacbot-lan-ip>`, does the same import into
 `isaacbot_amr_rmf_maps/maps/lab/` and `config/fleet_lab.yaml`. It uses ssh port 24 and asks for the
 password once. Those files are built into the image made on this machine, but git ignores them:
 maps imported from the isaacbot are not committed; only the Gazebo site `isaacbot_amr_world` is. A page
@@ -272,11 +272,11 @@ refuses tasks that use the new action ("Fleet not configured to perform this act
 
 ## Server deployment (WireGuard)
 
-For permanent use, RMF and the fleet's MQTT broker run on a server: `isaacbot-server-001`, reached at
-`10.8.0.1` over WireGuard. The isaacbot's connector dials out to that broker, so RMF keeps working
+For permanent use, RMF and the fleet's MQTT broker run on a server, reached at
+`<server-vpn-ip>` over WireGuard. The isaacbot's connector dials out to that broker, so RMF keeps working
 while the laptop is off. Every port is published on the WireGuard address only.
 
-| Port on 10.8.0.1 | Service |
+| Port on <server-vpn-ip> | Service |
 |---|---|
 | 1883 | Mosquitto with logins: `rmf` (this stack, all of `uagv/#`) and one login per isaacbot, limited to its own `uagv/v2/<manufacturer>/<serial>/#` (Ardennes: `ardennes`, `uagv/v2/IsaacBot/ardennis-3420987-k/#`) |
 | 3000 | Dashboard |
@@ -288,7 +288,7 @@ while the laptop is off. Every port is published on the WireGuard address only.
 **On the server**, once:
 
 1. Install Docker Engine with the compose plugin, and start it after `wg-quick@wg0`. Ports bound
-   to 10.8.0.1 fail if `wg0` isn't up yet.
+   to <server-vpn-ip> fail if `wg0` isn't up yet.
 2. Check out this repo and run:
    ```bash
    docker/rmf-server.sh init            # docker/server/.env, broker logins, sites page password (git-ignored)
@@ -344,7 +344,7 @@ The page creates broker credentials, so it asks for a password when `SITE_MANAGE
 set. `rmf-server.sh init` generates one, and `rmf-server.sh site-password` prints it, adding
 one to an older `server/.env` first (then `rmf-server.sh up -d site-manager`).
 
-To try a second robot before one exists, use `sim_site/`. It is a WireGuard peer at 10.8.0.6
+To try a second robot before one exists, use `sim_site/`. It is a WireGuard peer at <sim-site-vpn-ip>
 with a fake VDA 5050 robot behind it; see [sim_site/README.md](sim_site/README.md).
 
 A second site's router needs its own WireGuard peer. If the server must reach that site's LAN
@@ -359,14 +359,14 @@ the sites page, the page shows them. Ardennes's initial password comes from
 |---|---|
 | `ISAACBOT_AMR_VDA5050_ENABLE` | `true` |
 | `ISAACBOT_AMR_VDA5050_LOCAL_BROKER` | `false` |
-| `ISAACBOT_AMR_VDA5050_BROKER_HOST` | `10.8.0.1` |
+| `ISAACBOT_AMR_VDA5050_BROKER_HOST` | `<server-vpn-ip>` |
 | `ISAACBOT_AMR_VDA5050_BROKER_PORT` | `1883` |
 | `ISAACBOT_AMR_VDA5050_BROKER_USER` | `ardennes` |
 | `ISAACBOT_AMR_VDA5050_BROKER_PASSWORD` | the password from `isaacbot-password` |
 | `ISAACBOT_AMR_VDA5050_BROKER_TLS` | `false`; WireGuard already encrypts the link |
 
-The isaacbot reaches 10.8.0.1 through the RUTX11's tunnel. The sites page reaches the isaacbot's ssh
-(`192.168.1.201:24`) the other way, which needs a RUTX11 firewall rule for `10.8.0.1`.
+The isaacbot reaches <server-vpn-ip> through the RUTX11's tunnel. The sites page reaches the isaacbot's ssh
+(`<isaacbot-lan-ip>:24`) the other way, which needs a RUTX11 firewall rule for `<server-vpn-ip>`.
 Over 4G, VDA `state` (1 Hz) and `visualization` (2 Hz) are the steady load.
 
 ## Tests
