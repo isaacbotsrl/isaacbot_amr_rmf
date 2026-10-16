@@ -42,6 +42,15 @@
   </section>
 
   <section>
+    <h2>Network</h2>
+    <div id="connection">Loading…</div>
+    <h3>On-board network</h3>
+    <p class="muted" style="margin-top:0">Inside the isaacbot, for a laptop on its wired LAN or its
+      Wi-Fi.</p>
+    <div id="onboard-lan"></div>
+  </section>
+
+  <section>
     <h2>SSH access</h2>
     <div id="access">Checking…</div>
   </section>
@@ -88,6 +97,20 @@ function renderFacts(r) {
     </dl>`);
 }
 
+function renderNetwork(r) {
+  const s = r.session;
+  setHtml('connection', !r.broker_auth || !r.broker_log
+    ? '<p class="muted">No broker log here: where it connects from is unknown.</p>'
+    : `<dl class="facts">
+        <dt>Broker</dt><dd>${sessionState(s)}</dd>
+        <dt>VPN address</dt><dd>${s ? `<code>${esc(s.ip)}</code>` : '<span class="muted">unknown</span>'}</dd>
+        ${s ? `<dt>MQTT client</dt><dd><code>${esc(s.client_id)}</code></dd>` : ''}
+      </dl>`);
+  setHtml('onboard-lan', `<table><thead><tr><th>Device</th><th>Network</th><th>Address</th><th>Note</th></tr></thead><tbody>` +
+    r.onboard_lan.map((d) => `<tr><td>${esc(d.device)}</td><td>${esc(d.network)}</td>
+      <td><code>${esc(d.ip)}</code></td><td class="muted">${esc(d.note)}</td></tr>`).join('') + '</tbody></table>');
+}
+
 function renderAccess(r) {
   const a = r.access;
   let html;
@@ -116,7 +139,7 @@ async function refresh() {
     const status = await api('GET', '/api/status');
     renderRmf(status);
     robot = await api('GET', ROBOT);
-    renderFacts(robot); renderAccess(robot);
+    renderFacts(robot); renderNetwork(robot); renderAccess(robot);
   } catch (e) {
     if (/no robot/.test(e.message)) {
       setHtml('facts', `<p class="warning">${esc(e.message)}. <a href="/">Back to the robots</a></p>`);

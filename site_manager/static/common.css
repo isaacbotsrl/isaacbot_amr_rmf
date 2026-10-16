@@ -187,7 +187,6 @@ dl.facts dd { margin: 0; display: flex; flex-wrap: wrap; gap: 8px; align-items: 
 .net-services .dot, .net-others .dot { flex: none; width: 8px; height: 8px; }
 .net-others { display: grid; gap: 4px; border-top: 1px solid var(--line); padding-top: 8px; }
 .net-others li { font-size: 13px; }
-#onboard-lan { margin-top: 14px; }
-#onboard-lan summary { cursor: pointer; font-weight: 600; }
-#onboard-lan table { margin-top: 8px; font-size: 14px; }
+section h3 { font-family: var(--font-head); font-size: 15px; margin: 18px 0 4px; }
+#onboard-lan table { font-size: 14px; }
 @media (max-width: 400px) { .net-grid { grid-template-columns: 1fr; } }

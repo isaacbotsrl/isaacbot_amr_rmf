@@ -63,6 +63,14 @@ const ICONS = {
     <path d="M13 12V9h6v3M16 9V6M12 17.5h8"/><path d="M11.5 4.5a6 6 0 0 1 9 0"/></svg>`,
 };
 
+// Broker session of a robot or another client: online since / last seen.
+function sessionState(s) {
+  if (!s) return '<span class="status"><span class="dot"></span>not seen since the broker log began</span>';
+  return s.online
+    ? `<span class="status"><span class="dot ok"></span>connected ${esc(ago(s.since))}</span>`
+    : `<span class="status"><span class="dot bad"></span>offline, last seen ${esc(ago(s.last_seen))}</span>`;
+}
+
 // A robot's live state from the fleet adapter (null: RMF does not know it yet).
 function robotState(r) {
   const live = r.live;

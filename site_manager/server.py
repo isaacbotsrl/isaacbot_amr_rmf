@@ -392,7 +392,10 @@ class SiteManager:
             authorize=(f'{self.authorize_cmd} isaacbot-authorize {target[0]} {target[1]}'
                        if target else ''),
             broker_auth=fleet['broker_auth'], broker=fleet['broker'], site=fleet['site'],
-            waypoints=fleet['waypoints'], site_charger=fleet['site_charger'])
+            waypoints=fleet['waypoints'], site_charger=fleet['site_charger'],
+            session=network.session_dict(self._session(robot.broker_login, fleet['broker_auth'])),
+            broker_log=bool(self.broker_log and self.broker_log.available()),
+            onboard_lan=network.ISAACBOT_LAN)
         return entry
 
     # --- network ---------------------------------------------------------------------------
@@ -412,6 +415,12 @@ class SiteManager:
             self._services = (self.clock(), services)
         return services
 
+    def _session(self, login: str, broker_auth: bool) -> Optional[network.Session]:
+        """The login's broker session, from the broker log (None without logins or a log)."""
+        if not broker_auth or not self.broker_log:
+            return None
+        return self.broker_log.read().for_login(login)
+
     def network(self) -> dict:
         """Everyone on the fleet's network: the server, its services, each robot, other clients."""
         fleet = self.robots()
@@ -429,7 +438,6 @@ class SiteManager:
                        'log': bool(self.broker_log and self.broker_log.available())},
             'robots': robots,
             'others': [network.session_dict(s) for s in others],
-            'onboard_lan': network.ISAACBOT_LAN,
         }
 
     def update_robot(self, name: str, request: dict) -> dict:

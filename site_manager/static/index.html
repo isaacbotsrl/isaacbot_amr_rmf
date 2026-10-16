@@ -56,10 +56,6 @@
     <p class="muted" style="margin-top:0">Everyone on the fleet's network. Robot addresses are where each
       isaacbot connects to the broker from (its VPN address), from the broker's log.</p>
     <div id="network">Loading…</div>
-    <details id="onboard-lan">
-      <summary>On-board network (the same in every isaacbot)</summary>
-      <div id="onboard-lan-table"></div>
-    </details>
   </section>
 </main>
 <div id="site-footer"></div>
@@ -82,14 +78,6 @@ function renderRobots(data) {
         </div></td></tr>`).join('') + '</tbody></table>');
   setHtml('robot-charger', '<option value="">site charger</option>' +
     data.waypoints.map((w) => `<option>${esc(w)}</option>`).join(''));
-}
-
-// Broker session of a robot or another client: online since / last seen.
-function sessionState(s) {
-  if (!s) return '<span class="status"><span class="dot"></span>not seen since the broker log began</span>';
-  return s.online
-    ? `<span class="status"><span class="dot ok"></span>connected ${esc(ago(s.since))}</span>`
-    : `<span class="status"><span class="dot bad"></span>offline, last seen ${esc(ago(s.last_seen))}</span>`;
 }
 
 function sshCommand(ssh) {
@@ -136,9 +124,6 @@ function renderNetwork(net) {
     </article>`;
   }).join('');
   setHtml('network', `<div class="net-grid">${server}${robots}</div>`);
-  setHtml('onboard-lan-table', `<table><thead><tr><th>Device</th><th>Network</th><th>Address</th><th>Note</th></tr></thead><tbody>` +
-    net.onboard_lan.map((d) => `<tr><td>${esc(d.device)}</td><td>${esc(d.network)}</td>
-      <td><code>${esc(d.ip)}</code></td><td class="muted">${esc(d.note)}</td></tr>`).join('') + '</tbody></table>');
 }
 
 async function refresh() {

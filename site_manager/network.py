@@ -40,8 +40,8 @@ DISCONNECTED = re.compile(
 BROKER_START = re.compile(r'(\d+): mosquitto version \S+ (?:starting|terminating)')
 
 # The network inside every isaacbot (the same on each today), from
-# isaacbot_amr_networking/rutx11/README.md ("The router"). Operators use it on site, with a laptop
-# on the isaacbot's Wi-Fi or its wired LAN.
+# isaacbot_amr_networking/rutx11/README.md ("The router"), shown on each robot's page. Operators
+# use it on site, with a laptop on the isaacbot's Wi-Fi or its wired LAN.
 ISAACBOT_LAN = [
     {'device': 'Router (Teltonika RUTX11)', 'network': 'lan + Wi-Fi AP', 'ip': '192.168.1.1',
      'note': 'web UI https://192.168.1.1, ssh root@192.168.1.1; also .1 on 192.168.77.0/24'},

@@ -335,7 +335,10 @@ def test_network(robot_manager, tmp_path):
     assert ardennes['live']['connection'] == 'ONLINE'
     assert [o['login'] for o in net['others']] == ['rmf']
     assert net['broker'] == {'address': '10.8.0.1:1883', 'auth': True, 'log': True}
-    assert net['onboard_lan'][0]['ip'] == '192.168.1.1'
+    assert 'onboard_lan' not in net
+    page = robot_manager.robot('ardennes')
+    assert page['session']['ip'] == '10.8.0.5' and page['broker_log']
+    assert page['onboard_lan'][0]['ip'] == '192.168.1.1'
     # Probes are cached for 10 s.
     n = len(probed)
     robot_manager.network()
