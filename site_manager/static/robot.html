@@ -79,7 +79,8 @@ function renderFacts(r) {
   setHtml('live', robotState(r));
   // The editable settings are re-rendered only when they changed on the server, not every
   // refresh: an open select or a half-typed address must survive the 3 s poll.
-  const key = JSON.stringify([r.charger, r.ssh, r.waypoints, r.site_charger, r.broker_auth]);
+  const key = JSON.stringify([r.charger, r.ssh, r.waypoints, r.site_charger, r.broker_auth,
+                              r.ssh_shared_with]);
   if (key === settingsKey) return;
   settingsKey = key;
   const chargers = ['', ...r.waypoints].map((w) =>
@@ -93,6 +94,10 @@ function renderFacts(r) {
         <button data-save-charger>Save</button><span class="muted">changing it restarts RMF</span></dd>
       <dt>SSH</dt><dd><input type="text" id="ssh" value="${esc(r.ssh)}" placeholder="root@192.168.1.201:24" size="24">
         <button data-save-ssh>Save</button><span class="muted">where this robot's saved maps are read from; empty for none</span></dd>
+      ${r.ssh_shared_with.length ? `<dt></dt><dd><div class="message bad">⚠ ${r.ssh_shared_with.map((n) => `<a href="/robots/${encodeURIComponent(n)}">${esc(n)}</a>`).join(', ')}
+        ${r.ssh_shared_with.length > 1 ? 'use' : 'uses'} the same ssh address. It reaches only one isaacbot (every
+        isaacbot has the same 192.168.1.x LAN), so the maps below may be another robot's. Give this robot
+        its own address, e.g. its VPN address.</div></dd>` : ''}
       <dt></dt><dd><button class="danger" data-robot-delete>Remove this robot</button></dd>
     </dl>`);
 }

@@ -438,6 +438,29 @@ def test_update_ssh_does_not_restart_rmf_but_charger_does(manager):
         manager.update_robot('ardennes', {'serial_number': 'x'})
 
 
+def test_ssh_address_must_be_unique(manager):
+    """Every isaacbot's LAN is the same: one ssh address reaches one isaacbot only."""
+    with pytest.raises(server.RobotConflict, match="'ardennes' already uses the ssh address"):
+        manager.add_robot({'name': 'ardennes_e', 'serial_number': 'e',
+                           'ssh': 'admin@192.168.1.201:24'})
+    manager.add_robot({'name': 'ardennes_e', 'serial_number': 'e', 'ssh': 'root@10.8.0.6:24'})
+    with pytest.raises(server.RobotConflict, match='192.168.1.201:24'):
+        manager.update_robot('ardennes_e', {'ssh': 'root@192.168.1.201'})   # port 24 default
+    manager.update_robot('ardennes_e', {'ssh': 'root@192.168.1.201:2222'})  # another sshd
+    manager.update_robot('ardennes_e', {'ssh': ''})
+    manager.update_robot('ardennes', {'ssh': 'root@10.8.0.5:24'})           # its own again
+    # A list saved before the check: both pages say so.
+    robots = server.fleet_robots
+    robots.save(manager.robots_path, [replace_ssh(r, 'root@192.168.1.201:24')
+                                      for r in manager._robot_list()])
+    assert manager.robot('ardennes')['ssh_shared_with'] == ['ardennes_e']
+    assert manager.robot('ardennes_e')['ssh_shared_with'] == ['ardennes']
+
+
+def replace_ssh(robot, ssh):
+    return server.replace(robot, ssh=ssh)
+
+
 def test_robot_without_ssh_has_no_maps(manager):
     manager.add_robot({'name': 'sim', 'serial_number': 'sim-1'})
     assert manager.robot('sim')['access']['state'] == 'no_ssh'

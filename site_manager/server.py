@@ -368,10 +368,12 @@ class SiteManager:
             live = {}
         site = self._active_site() or {}
         robots = []
-        for robot in self._robot_list():
+        robot_list = self._robot_list()
+        for robot in robot_list:
             entry = asdict(robot)
             entry.update(broker_login=robot.broker_login, topic_prefix=robot.topic_prefix,
-                         live=live.get(robot.name))
+                         live=live.get(robot.name),
+                         ssh_shared_with=fleet_robots.ssh_shared_with(robot_list, robot))
             robots.append(entry)
         return {'robots': robots, 'broker_auth': self.broker_auth is not None,
                 'broker': f'{self.robot_broker[0]}:{self.robot_broker[1]}',
@@ -453,6 +455,8 @@ class SiteManager:
             robots = self._robot_list()
             robot = self._find(robots, name)
             updated = fleet_robots.validate(replace(robot, **changes))
+            if 'ssh' in changes:
+                fleet_robots.check_ssh_unique(robots, updated)
             fleet_robots.save(self.robots_path,
                               [updated if r.name == name else r for r in robots])
         self._access.pop(name, None)

@@ -86,6 +86,11 @@ class Robot:
         target, _, port = self.ssh.partition(':')
         return target, int(port) if port else DEFAULT_SSH_PORT
 
+    def ssh_endpoint(self) -> Optional[Tuple[str, int]]:
+        """(host, port) its maps are read from: two robots with the same one are the same sshd."""
+        target = self.ssh_target()
+        return (target[0].split('@')[-1].lower(), target[1]) if target else None
+
     @property
     def topic_prefix(self) -> str:
         return f'uagv/v2/{self.manufacturer}/{self.serial_number}'
@@ -110,7 +115,32 @@ def validate(robot: Robot, reserved_logins: Sequence[str] = ()) -> Robot:
     return robot
 
 
+def ssh_shared_with(robots: Sequence[Robot], robot: Robot) -> List[str]:
+    """The other robots whose ssh address reaches the same host and port as robot's."""
+    endpoint = robot.ssh_endpoint()
+    return [r.name for r in robots
+            if endpoint and r.name != robot.name and r.ssh_endpoint() == endpoint]
+
+
+def check_ssh_unique(robots: Sequence[Robot], robot: Robot) -> None:
+    """
+    Refuse an ssh address another robot already uses.
+
+    Every isaacbot's own LAN is the same (192.168.1.0/24, controller .201) and the server routes
+    that subnet to one WireGuard peer only, so such an address reaches one isaacbot: the other
+    robot's page would list that one's maps.
+    """
+    others = ssh_shared_with(robots, robot)
+    if others:
+        host, port = robot.ssh_endpoint()
+        raise RobotConflict(
+            f'{others[0]!r} already uses the ssh address {host}:{port}, and it reaches only one '
+            "isaacbot (every isaacbot has the same 192.168.1.x LAN); use this robot's own "
+            'address, e.g. its VPN address')
+
+
 def check_unique(robots: Sequence[Robot], new: Robot) -> None:
+    check_ssh_unique(robots, new)
     for r in robots:
         if r.name == new.name:
             raise RobotConflict(f'robot {new.name!r} already exists')
