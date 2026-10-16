@@ -169,3 +169,25 @@ a.robot-link:hover { text-decoration: underline; }
 dl.facts { display: grid; grid-template-columns: max-content 1fr; gap: 8px 18px; margin: 0; }
 dl.facts dt { color: var(--muted); }
 dl.facts dd { margin: 0; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+/* The robots page's Network section: the server card, then one card per robot. */
+.net-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+.net-card { border: 1px solid var(--line); border-radius: 9px; padding: 12px 14px; display: grid;
+            gap: 10px; align-content: start; min-width: 0; }
+.net-card.server { border-color: var(--ink); }
+.net-card header { display: flex; gap: 12px; align-items: center; }
+.net-icon { width: 34px; height: 34px; flex: none; color: var(--text); }
+.net-name { font-family: var(--font-head); font-weight: 600; font-size: 17px; }
+.net-card dl.facts { font-size: 14px; gap: 4px 14px; }
+.net-card dl.facts dd { min-width: 0; overflow-wrap: anywhere; }
+.net-card .cmd pre { margin: 0; }
+.net-services, .net-others ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px;
+                                font-size: 14px; }
+.net-services li, .net-others li { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.net-services .dot, .net-others .dot { flex: none; width: 8px; height: 8px; }
+.net-others { display: grid; gap: 4px; border-top: 1px solid var(--line); padding-top: 8px; }
+.net-others li { font-size: 13px; }
+#onboard-lan { margin-top: 14px; }
+#onboard-lan summary { cursor: pointer; font-weight: 600; }
+#onboard-lan table { margin-top: 8px; font-size: 14px; }
+@media (max-width: 400px) { .net-grid { grid-template-columns: 1fr; } }

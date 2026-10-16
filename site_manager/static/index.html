@@ -51,6 +51,16 @@
     </form>
     <div id="robot-result"></div>
   </section>
+  <section class="network">
+    <h2>Network</h2>
+    <p class="muted" style="margin-top:0">Everyone on the fleet's network. Robot addresses are where each
+      isaacbot connects to the broker from (its VPN address), from the broker's log.</p>
+    <div id="network">Loading…</div>
+    <details id="onboard-lan">
+      <summary>On-board network (the same in every isaacbot)</summary>
+      <div id="onboard-lan-table"></div>
+    </details>
+  </section>
 </main>
 <div id="site-footer"></div>
 
@@ -74,10 +84,68 @@ function renderRobots(data) {
     data.waypoints.map((w) => `<option>${esc(w)}</option>`).join(''));
 }
 
+// Broker session of a robot or another client: online since / last seen.
+function sessionState(s) {
+  if (!s) return '<span class="status"><span class="dot"></span>not seen since the broker log began</span>';
+  return s.online
+    ? `<span class="status"><span class="dot ok"></span>connected ${esc(ago(s.since))}</span>`
+    : `<span class="status"><span class="dot bad"></span>offline, last seen ${esc(ago(s.last_seen))}</span>`;
+}
+
+function sshCommand(ssh) {
+  const [target, port] = ssh.split(':');
+  return `ssh -p ${port || 24} ${target}`;
+}
+
+function renderNetwork(net) {
+  const srv = net.server, broker = net.broker, host = location.hostname;
+  const fact = (label, value) => value ? `<dt>${label}</dt><dd>${value}</dd>` : '';
+  const services = srv.services.map((s) => {
+    const name = s.web && s.up ? `<a href="http://${host}${s.port === 80 ? '' : ':' + s.port}" target="_blank" rel="noopener">${esc(s.name)}</a>` : esc(s.name);
+    return `<li><span class="dot ${s.up ? 'ok' : 'bad'}" title="${s.up ? 'up' : 'not answering'}"></span>${name}
+      ${s.port ? `<code class="muted">:${s.port}</code>` : ''}</li>`;
+  }).join('');
+  const others = !net.others.length ? '' : `<div class="net-others"><div class="muted">Other broker clients</div><ul>` +
+    net.others.map((o) => `<li><span class="dot ${o.online ? 'ok' : ''}"></span>
+      <code>${esc(o.login || 'anonymous')}</code> <span class="muted">${esc(o.client_id)} · ${esc(o.ip)}
+      · ${o.online ? 'since ' + esc(ago(o.since)) : 'last seen ' + esc(ago(o.last_seen))}</span></li>`).join('') + '</ul></div>';
+  const server = `<article class="net-card server">
+      <header>${ICONS.server}<div><div class="net-name">${esc(srv.hostname || 'RMF server')}</div>
+        <div class="muted">RMF server · broker · dashboard</div></div></header>
+      <dl class="facts">
+        ${fact('VPN address', srv.vpn_ip ? `<code>${esc(srv.vpn_ip)}</code> <span class="muted">WireGuard</span>` : '')}
+        ${fact('LAN address', srv.lan_ip ? `<code>${esc(srv.lan_ip)}</code>` : '')}
+        ${fact('Broker', `<code>${esc(broker.address)}</code> <span class="muted">${broker.auth ? 'logins + ACL' : 'anonymous'}</span>`)}
+      </dl>
+      <ul class="net-services">${services}</ul>${others}
+    </article>`;
+  const robots = net.robots.map((r) => {
+    const s = r.session;
+    return `<article class="net-card">
+      <header>${ICONS.robot}<div><a class="net-name robot-link" href="/robots/${encodeURIComponent(r.name)}">${esc(r.name)}</a>
+        <div>${broker.auth && broker.log ? sessionState(s) : '<span class="muted">no broker log here</span>'}</div></div></header>
+      <dl class="facts">
+        ${fact('VPN address', s ? `<code>${esc(s.ip)}</code>` : '<span class="muted">unknown</span>')}
+        ${fact('VDA 5050', robotState(r))}
+        ${fact('MQTT client', s ? `<code>${esc(s.client_id)}</code>` : '')}
+        ${fact('Broker login', broker.auth ? `<code>${esc(r.broker_login)}</code>` : '')}
+        ${fact('Topics', `<code>${esc(r.topic_prefix)}/…</code>`)}
+      </dl>
+      ${r.ssh ? `<div class="cmd"><pre>${esc(sshCommand(r.ssh))}</pre><button data-copy>Copy</button></div>`
+              : '<div class="muted">No ssh address (maps not read from it).</div>'}
+    </article>`;
+  }).join('');
+  setHtml('network', `<div class="net-grid">${server}${robots}</div>`);
+  setHtml('onboard-lan-table', `<table><thead><tr><th>Device</th><th>Network</th><th>Address</th><th>Note</th></tr></thead><tbody>` +
+    net.onboard_lan.map((d) => `<tr><td>${esc(d.device)}</td><td>${esc(d.network)}</td>
+      <td><code>${esc(d.ip)}</code></td><td class="muted">${esc(d.note)}</td></tr>`).join('') + '</tbody></table>');
+}
+
 async function refresh() {
   try {
     renderRmf(await api('GET', '/api/status'));
     renderRobots(await api('GET', '/api/robots'));
+    renderNetwork(await api('GET', '/api/network'));
   } catch (e) {
     setHtml('rmf', `<span class="dot bad"></span><span>Site manager unreachable: ${esc(e.message)}</span>`);
   }

@@ -313,6 +313,42 @@ def test_robots_list_survives_a_dead_fleet_api(robot_manager):
     assert robot_manager.robots()['robots'][0]['live'] is None
 
 
+def test_network(robot_manager, tmp_path):
+    log = tmp_path / 'broker.log'
+    log.write_text(
+        "100: New client connected from 10.8.0.5:59127 as auto-1 (p4, c1, k60, u'ardennes').\n"
+        '101: New client connected from 172.18.0.2:5000 as rmf-fleet-ardennes '
+        "(p4, c1, k30, u'rmf').\n")
+    probed = []
+    robot_manager.broker_log = server.network.BrokerLog(str(log))
+    robot_manager.host_info = {'hostname': 'isaacbot-server-001', 'vpn_ip': '10.8.0.1',
+                               'lan_ip': '192.168.100.12'}
+    robot_manager.probe = lambda host, port: probed.append((host, port)) or host != 'rmf'
+    net = robot_manager.network()
+    assert net['server']['hostname'] == 'isaacbot-server-001'
+    services = {s['name']: s for s in net['server']['services']}
+    assert services['Isaacbot website']['up'] and services['Site manager']['up']
+    assert not services['Fleet control API']['up'] and services['RMF API server']['port'] == 8010
+    assert ('10.8.0.1', 80) in probed and ('', 8020) not in probed
+    ardennes = net['robots'][0]
+    assert ardennes['session']['ip'] == '10.8.0.5' and ardennes['session']['online']
+    assert ardennes['live']['connection'] == 'ONLINE'
+    assert [o['login'] for o in net['others']] == ['rmf']
+    assert net['broker'] == {'address': '10.8.0.1:1883', 'auth': True, 'log': True}
+    assert net['onboard_lan'][0]['ip'] == '192.168.1.1'
+    # Probes are cached for 10 s.
+    n = len(probed)
+    robot_manager.network()
+    assert len(probed) == n
+
+
+def test_network_without_broker_log(manager):
+    manager.probe = lambda host, port: False
+    net = manager.network()
+    assert net['robots'][0]['session'] is None and net['others'] == []
+    assert net['broker']['log'] is False and net['server']['services']
+
+
 def test_http_robots(robot_manager):
     httpd = ThreadingHTTPServer(('127.0.0.1', 0), server.make_handler(
         robot_manager, os.path.join(REPO, 'site_manager', 'static')))
@@ -320,6 +356,9 @@ def test_http_robots(robot_manager):
     url = f'http://127.0.0.1:{httpd.server_address[1]}'
     try:
         code, _, body = request(f'{url}/api/robots')
+        assert code == 200 and json.loads(body)['robots'][0]['name'] == 'ardennes'
+        robot_manager.probe = lambda host, port: False
+        code, _, body = request(f'{url}/api/network')
         assert code == 200 and json.loads(body)['robots'][0]['name'] == 'ardennes'
         body = {'name': 'ardennes_e', 'serial_number': 'ardennis-3420987-e'}
         code, _, data = request(f'{url}/api/robots', 'POST', body)

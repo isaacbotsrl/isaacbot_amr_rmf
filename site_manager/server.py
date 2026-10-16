@@ -48,6 +48,10 @@ Environment:
     ROBOT_BROKER    host[:port] the isaacbots reach the broker on, for the balena variables
                     (default ISAACBOT_AMR_BROKER)
     FLEET_API       the fleet adapter's control API, for live robot state (default http://rmf:8030)
+    BROKER_LOG      the broker's log file, for where each robot connects from (default
+                    $BROKER_AUTH_DIR/broker.log; none without BROKER_AUTH_DIR)
+    SERVER_HOSTNAME, SERVER_VPN_IP, SERVER_LAN_IP   the host's name and addresses, for the
+                    robots page's Network section (docker/rmf-server.sh passes them)
     SITE_MANAGER_PASSWORD  when set, every request needs HTTP Basic auth with this password
     PORT            default 8020
 """
@@ -78,6 +82,7 @@ for candidate in (os.path.join(HERE, '..', 'isaacbot_amr_rmf_maps', 'scripts'),
 sys.path.insert(0, HERE)
 
 from isaacbot_amr_map_import import import_site, MapImportError  # noqa: E402
+import network  # noqa: E402
 import robots as fleet_robots  # noqa: E402
 from robots import Robot, RobotConflict, RobotError, RobotNotFound  # noqa: E402
 from site_io import DirMapSource, render_preview, SshMapSource  # noqa: E402
@@ -87,6 +92,16 @@ import yaml  # noqa: E402
 NAME = re.compile(r'[A-Za-z0-9_-]{1,64}')
 NAV_GRAPH_CMD = ('ros2', 'run', 'rmf_building_map_tools', 'building_map_generator', 'nav')
 DEFAULT_AUTHORIZE_CMD = 'docker compose -f docker/docker-compose.yml exec site-manager'
+# The stack's services: (name, host and port in the compose network, port published on the
+# host (None: the robots' broker port), has a web page). The site manager itself answers this request, so it is always up.
+SERVICES = (
+    ('RMF dashboard', 'dashboard', 3000, 3000, True),
+    ('RMF API server', 'api-server', 8000, 8010, True),
+    ('Site manager', '', 8020, 8020, True),
+    ('MQTT broker', 'mosquitto', 1883, None, False),
+    ('Fleet control API', 'rmf', 8030, 8030, False),
+    ('RMF schedule websocket', 'rmf', 8006, 8006, False),
+)
 
 
 class RequestError(ValueError):
@@ -108,13 +123,23 @@ class SiteManager:
                  broker_auth: Optional[fleet_robots.BrokerAuth] = None,
                  robot_broker: Optional[tuple] = None,
                  fleet_state: Optional[Callable[[], dict]] = None,
-                 default_ssh: str = '', authorize_cmd: str = DEFAULT_AUTHORIZE_CMD):
+                 default_ssh: str = '', authorize_cmd: str = DEFAULT_AUTHORIZE_CMD,
+                 broker_log: Optional[network.BrokerLog] = None, host_info: Optional[dict] = None,
+                 services: Sequence[tuple] = SERVICES,
+                 probe: Callable[[str, int], bool] = network.probe):
         """
         source_for(robot): where that robot's saved maps are read from (an SshMapSource, a
         DirMapSource for the simulation), or None when it has none. default_ssh: the ssh address
         robots seeded from the fleet template get. authorize_cmd: what runs isaacbot-authorize
-        in the site-manager container, for the command the page shows.
+        in the site-manager container, for the command the page shows. broker_log: the broker's
+        log (None: no connection data). host_info: hostname, vpn_ip, lan_ip of the host. services:
+        see SERVICES; probe(host, port) checks one.
         """
+        self.broker_log = broker_log
+        self.host_info = host_info or {}
+        self.services = list(services)
+        self.probe = probe
+        self._services = (-1e9, [])            # (checked, services)
         self.sites_dir = sites_dir
         self.builtin_maps = builtin_maps
         self.template_path = template_path
@@ -370,6 +395,43 @@ class SiteManager:
             waypoints=fleet['waypoints'], site_charger=fleet['site_charger'])
         return entry
 
+    # --- network ---------------------------------------------------------------------------
+
+    def service_status(self, max_age: float = 10.0) -> list:
+        """The stack's services, each probed at most every max_age s."""
+        checked, services = self._services
+        if self.clock() - checked > max_age:
+            services = []
+            vpn_ip = self.host_info.get('vpn_ip')
+            if vpn_ip:
+                services.append({'name': 'Isaacbot website', 'port': 80, 'web': True,
+                                 'up': self.probe(vpn_ip, 80)})
+            for name, host, port, public, web in self.services:
+                services.append({'name': name, 'port': public or self.robot_broker[1], 'web': web,
+                                 'up': True if not host else self.probe(host, port)})
+            self._services = (self.clock(), services)
+        return services
+
+    def network(self) -> dict:
+        """Everyone on the fleet's network: the server, its services, each robot, other clients."""
+        fleet = self.robots()
+        sessions = self.broker_log.read() if self.broker_log else network.BrokerSessions()
+        robots = []
+        for entry in fleet['robots']:
+            session = sessions.for_login(entry['broker_login']) if fleet['broker_auth'] else None
+            robots.append({k: entry[k] for k in (
+                'name', 'manufacturer', 'serial_number', 'broker_login', 'topic_prefix', 'ssh',
+                'live')} | {'session': network.session_dict(session)})
+        others = sessions.others(r['broker_login'] for r in fleet['robots'])
+        return {
+            'server': dict(self.host_info, services=self.service_status()),
+            'broker': {'address': fleet['broker'], 'auth': fleet['broker_auth'],
+                       'log': bool(self.broker_log and self.broker_log.available())},
+            'robots': robots,
+            'others': [network.session_dict(s) for s in others],
+            'onboard_lan': network.ISAACBOT_LAN,
+        }
+
     def update_robot(self, name: str, request: dict) -> dict:
         """Change a robot's charger and/or ssh address (its identity and login stay)."""
         changes = {k: request[k].strip() for k in ('charger', 'ssh')
@@ -516,7 +578,8 @@ def make_handler(manager: SiteManager, static_dir: str, password: str = ''):
         server_version = 'IsaacbotRmfSites/1'
 
         def log_message(self, fmt, *args):
-            if not self.path.startswith(('/api/status', '/api/robots')) or 'GET' not in fmt % args:
+            if (not self.path.startswith(('/api/status', '/api/robots', '/api/network'))
+                    or 'GET' not in fmt % args):
                 # (the pages poll those every 3 s)
                 sys.stderr.write('site-manager: ' + fmt % args + '\n')
 
@@ -591,6 +654,8 @@ def make_handler(manager: SiteManager, static_dir: str, password: str = ''):
                 return self._call(manager.status)
             if path == '/api/robots':
                 return self._call(manager.robots)
+            if path == '/api/network':
+                return self._call(manager.network)
             match = re.fullmatch(r'/api/robots/([^/]+)(/maps)?', path)
             if match:
                 if match.group(2):
@@ -663,6 +728,11 @@ def main():
         describe = "each robot's ssh address"
     robot_host, _, robot_port = os.environ.get('ROBOT_BROKER', broker).partition(':')
     auth_dir = os.environ.get('BROKER_AUTH_DIR', '')
+    broker_log = os.environ.get('BROKER_LOG') or (
+        os.path.join(auth_dir, 'broker.log') if auth_dir else '')
+    host_info = {'hostname': os.environ.get('SERVER_HOSTNAME', ''),
+                 'vpn_ip': os.environ.get('SERVER_VPN_IP', ''),
+                 'lan_ip': os.environ.get('SERVER_LAN_IP', '')}
     manager = SiteManager(
         sites_dir=os.environ.get('SITES_DIR', '/sites'),
         builtin_maps=os.environ.get(
@@ -676,7 +746,8 @@ def main():
         authorize_cmd=os.environ.get('AUTHORIZE_CMD', DEFAULT_AUTHORIZE_CMD),
         broker_auth=fleet_robots.BrokerAuth(auth_dir) if auth_dir else None,
         robot_broker=(robot_host, int(robot_port or 1883)),
-        fleet_state=fleet_api_state(os.environ.get('FLEET_API', 'http://rmf:8030')))
+        fleet_state=fleet_api_state(os.environ.get('FLEET_API', 'http://rmf:8030')),
+        broker_log=network.BrokerLog(broker_log) if broker_log else None, host_info=host_info)
     port = int(os.environ.get('PORT', '8020'))
     password = os.environ.get('SITE_MANAGER_PASSWORD', '')
     server = ThreadingHTTPServer(('0.0.0.0', port),

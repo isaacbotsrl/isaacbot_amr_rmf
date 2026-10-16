@@ -31,6 +31,10 @@ ENV_FILE="$SERVER/.env"
 MOSQUITTO_IMAGE=docker.io/library/eclipse-mosquitto:2
 
 compose() {
+    # For the site manager's Network section (docker-compose.server.yml).
+    SERVER_HOSTNAME="$(hostname)"
+    SERVER_LAN_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' || true)"
+    export SERVER_HOSTNAME SERVER_LAN_IP
     docker compose -f "$HERE/docker-compose.yml" -f "$HERE/docker-compose.server.yml" \
         --env-file "$ENV_FILE" "$@"
 }

@@ -53,6 +53,16 @@ function renderRmf(status) {
   setHtml('rmf', `<span class="dot ${cls}"></span><span>${esc(text)}</span>`);
 }
 
+// Line icons for the Network section (currentColor, so they follow the theme).
+const ICONS = {
+  server: `<svg class="net-icon" viewBox="0 0 32 32" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+    <rect x="5" y="4" width="22" height="10" rx="2"/><rect x="5" y="18" width="22" height="10" rx="2"/>
+    <path d="M10 9h.01M10 23h.01M15 9h7M15 23h7"/></svg>`,
+  robot: `<svg class="net-icon" viewBox="0 0 32 32" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+    <rect x="4" y="12" width="24" height="11" rx="2.5"/><circle cx="10" cy="25" r="2.5"/><circle cx="22" cy="25" r="2.5"/>
+    <path d="M13 12V9h6v3M16 9V6M12 17.5h8"/><path d="M11.5 4.5a6 6 0 0 1 9 0"/></svg>`,
+};
+
 // A robot's live state from the fleet adapter (null: RMF does not know it yet).
 function robotState(r) {
   const live = r.live;

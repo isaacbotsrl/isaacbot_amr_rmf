@@ -22,8 +22,13 @@
 #
 # First start: the volume is seeded from /mosquitto/seed (server/mosquitto.passwd from
 # rmf-server.sh init, and mosquitto.acl), so the existing logins keep working.
+#
+# Mosquitto also logs to $AUTH/broker.log for the site manager (who is connected, from where).
+# Past LOG_MAX bytes it becomes broker.log.1 and Mosquitto reopens a new one on SIGHUP.
 AUTH=/mosquitto/auth
 SEED=/mosquitto/seed
+LOG="$AUTH/broker.log"
+LOG_MAX=524288
 
 for f in passwd acl; do
     if [ ! -s "$AUTH/$f" ] && [ -s "$SEED/$f" ]; then
@@ -36,6 +41,12 @@ for f in passwd acl; do
     fi
 done
 
+new_log() {
+    touch "$LOG"
+    chown 1883:1883 "$LOG"
+}
+new_log
+
 stamp() { cat "$AUTH/passwd" "$AUTH/acl" 2>/dev/null | md5sum; }
 
 mosquitto -c /mosquitto/config/mosquitto.conf &
@@ -45,6 +56,11 @@ trap 'kill -TERM "$PID" 2>/dev/null; wait "$PID"; exit 0' TERM INT
 LAST="$(stamp)"
 while kill -0 "$PID" 2>/dev/null; do
     sleep 2
+    if [ "$(wc -c < "$LOG" 2>/dev/null || echo 0)" -gt "$LOG_MAX" ]; then
+        mv "$LOG" "$LOG.1"
+        new_log
+        kill -HUP "$PID"
+    fi
     NOW="$(stamp)"
     if [ "$NOW" != "$LAST" ]; then
         LAST="$NOW"
