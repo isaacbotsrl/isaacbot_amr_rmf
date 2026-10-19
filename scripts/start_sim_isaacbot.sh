@@ -16,14 +16,15 @@
 # The simulated isaacbot's side of the Open-RMF demo, in one terminal. Start Gazebo first
 # (isaacbot_amr_ros/isaacbot_amr_gazebo/scripts/isaacbot_amr_sim.sh), then:
 #
-#   start_sim_isaacbot.sh [--broker-port 1884] [--localization slam|indoor|...] [--maps-dir DIR]
+#   start_sim_isaacbot.sh [--broker-port 1884] [--maps-dir DIR]
 #
-# --localization indoor runs isaacbot_amr_indoor_nav_manager like the real isaacbot (save a map and places,
-# then scripts/import_isaacbot_amr_map.py NAME --dir DIR/NAME); --maps-dir is where it keeps them
+# Localization is automatic, as on the real isaacbot: isaacbot_amr_indoor_nav_manager runs SLAM
+# until a map is selected, then AMCL (save a map and places, then
+# scripts/import_isaacbot_amr_map.py NAME --dir DIR/NAME); --maps-dir is where it keeps them
 # (default ~/isaacbot_amr_maps; the isaacbot uses /maps).
 #
 # It starts, in the isaacbot_amr_sim.sh environment (rmw_zenoh, local router, namespace `isaacbot`):
-#   - isaacbot_amr_navigation bringup (Nav 2, use_sim_time, SLAM by default)
+#   - isaacbot_amr_navigation bringup (Nav 2, use_sim_time, automatic localization)
 #   - isaacbot_amr_drive_mode and isaacbot_amr_mission_manager
 #   - the isaacbot's VDA 5050 connector, pointed at the isaacbot_amr_rmf compose broker (localhost:1884)
 # then switches the drive mode to AUTOMATIC (the mission manager refuses orders otherwise).
@@ -31,21 +32,16 @@
 set -eo pipefail
 
 BROKER_PORT=1884
-LOCALIZATION=slam
 MAPS_DIR="$HOME/isaacbot_amr_maps"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --broker-port) BROKER_PORT="$2"; shift 2 ;;
-        --localization) LOCALIZATION="$2"; shift 2 ;;
         --maps-dir) MAPS_DIR="$2"; shift 2 ;;
-        -h | --help) sed -n '5,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h | --help) sed -n '16,30p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
 done
-case "$LOCALIZATION" in
-    odom) MAP_FRAME=odom ;;
-    *) MAP_FRAME=map ;;
-esac
+MAP_FRAME=map
 
 HERE=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
 ISAACBOT_AMR_SIM="$HERE/../../isaacbot_amr_ros/isaacbot_amr_gazebo/scripts/isaacbot_amr_sim.sh"
@@ -105,12 +101,12 @@ ZENOH_CLIENT='mode="client";connect/endpoints=["tcp/127.0.0.1:7447"];listen/endp
 
 mkdir -p "$MAPS_DIR"
 start navigation ros2 launch isaacbot_amr_navigation bringup.launch.py \
-    namespace:="$NS" use_sim_time:=True localization_source:="$LOCALIZATION" maps_dir:="$MAPS_DIR"
+    namespace:="$NS" use_sim_time:=True maps_dir:="$MAPS_DIR"
 start drive_mode env ZENOH_CONFIG_OVERRIDE="$ZENOH_CLIENT" \
     ros2 launch isaacbot_amr_drive_mode isaacbot_amr_drive_mode.launch.py namespace:="$NS" use_sim_time:=True
 start mission_manager env ZENOH_CONFIG_OVERRIDE="$ZENOH_CLIENT" \
     ros2 launch isaacbot_amr_mission_manager isaacbot_amr_mission_manager.launch.py \
-    namespace:="$NS" use_sim_time:=True localization_source:="$LOCALIZATION"
+    namespace:="$NS" use_sim_time:=True
 start vda5050 env ZENOH_CONFIG_OVERRIDE="$ZENOH_CLIENT" \
     ros2 launch isaacbot_amr_vda5050_bringup vda5050.launch.py \
     namespace:="$NS" use_sim_time:=true map_frame:="$MAP_FRAME" \

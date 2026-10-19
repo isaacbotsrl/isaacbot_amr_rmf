@@ -35,7 +35,7 @@ ROS distros never share a graph.
 | `isaacbot_amr_rmf_bringup` | `isaacbot_amr_rmf.launch.xml` (RMF core and the adapter; `site:=<site>`) and `config/fleet_<site>.yaml` (RMF fleet config plus the adapter's `vda5050` section). |
 | `dashboard/` | Our rmf-web dashboard app: IsaacBot branding, the **ISAACBOT TASK** dialog (`tasks/`) and the **Isaacbot** window (`isaacbot/`: drive mode, in or out of the fleet). See [Dashboard](#dashboard). |
 | `docker/` | `Dockerfile.rmf` (Jazzy, RMF debs, builds and tests the packages), `docker-compose.yml` (mosquitto, rmf, rmf-web api-server and dashboard), broker and api-server configs. `Dockerfile.dashboard` builds `dashboard/` inside a pinned rmf-web checkout. |
-| `scripts/start_sim_isaacbot.sh` | Starts the simulated isaacbot's side in one terminal: Nav 2, drive mode, mission manager and the VDA 5050 connector on `:1884`. It then sets the drive mode to AUTOMATIC. `--localization indoor` behaves like the real isaacbot. |
+| `scripts/start_sim_isaacbot.sh` | Starts the simulated isaacbot's side in one terminal: Nav 2, drive mode, mission manager and the VDA 5050 connector on `:1884`. It then sets the drive mode to AUTOMATIC. Localization is automatic, as on the real isaacbot. |
 | `site_manager/` | The RMF robots and sites page (<http://localhost:8020>, compose service `site-manager`). The main page lists the fleet's robots. A robot's page lists the maps saved on that isaacbot and imports them as sites into the `rmf-sites` volume; `/sites` lists the sites, which the whole fleet shares, and activates one. `docker/run_rmf.sh` runs RMF for the active site and restarts it on a switch. |
 | `scripts/import_isaacbot_amr_map.py` | The same import from the command line, into `isaacbot_amr_rmf_maps/maps/` (git-ignored, built into the local image). |
 
@@ -146,7 +146,7 @@ Then:
 
   The dashboard's task panel can create the same task.
 - **Watching the VDA traffic:** `mosquitto_sub -p 1884 -t 'uagv/v2/#' -v`
-- **The whole real-isaacbot flow in the sim:** run `start_sim_isaacbot.sh --localization indoor`,
+- **The whole real-isaacbot flow in the sim:** run `start_sim_isaacbot.sh`,
   then map and save the map and its places with the indoor manager's services.
   - Start the stack with `-f docker/docker-compose.sim-maps.yml` added, so the sites page reads
     `~/isaacbot_amr_maps` instead of the isaacbot's `/maps`.
@@ -175,7 +175,6 @@ drive UI, and that map becomes the RMF site.
 1. **Deploy.** Push the VDA 5050 and drive-mode work (isaacbot_amr_vda5050 `master`, isaacbot_amr_orchestrator,
    isaacbot_amr_ros, isaacbot_amr_drive_interface, rover_docker), then `balena push`.
 2. **balenaCloud variables, on all services:**
-   - `ISAACBOT_AMR_ORCH_LOCALIZATION_SOURCE=indoor`
    - `ISAACBOT_AMR_ORCH_MISSION_MANAGER=true`
    - `ISAACBOT_AMR_VDA5050_ENABLE=true`
    - `ISAACBOT_AMR_VDA5050_LOCAL_BROKER=true` is already the default.
