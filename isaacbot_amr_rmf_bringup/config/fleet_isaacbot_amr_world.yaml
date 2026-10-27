@@ -7,13 +7,15 @@
 rmf_fleet:
   name: "isaacbot_amr_fleet"
   limits:
-    # [velocity m/s, acceleration m/s^2] RMF plans its schedule with. Nav 2 caps the isaacbot at
-    # 0.8 m/s and 1.4 m/s^2 (isaacbot_amr_nav_params.yaml velocity_smoother max_velocity/max_accel);
-    # 0.5 m/s is the cruise it keeps in practice (wheel PID overshoot, memory 2026-09-27) and
-    # keeps RMF's arrival estimates conservative. ASSUMPTION.
-    linear: [0.5, 0.75]
-    # Skid steer: wz 1.0 command gives ~0.5 rad/s real turn rate (verified live 2026-09-27).
-    angular: [0.5, 1.0]
+    # [velocity m/s, acceleration m/s^2] RMF plans its schedule with: Nav 2's caps, 0.8 m/s and
+    # 2.7 m/s^2 (isaacbot_amr_nav_params.yaml velocity_smoother max_velocity/max_accel). It was
+    # 0.5 m/s / 0.75 m/s^2 while the DCC1000 host wheel PIDs overshot (2026-09-27); the DCC1020
+    # closes the speed loop on board. ASSUMPTION until the real cruise is measured.
+    linear: [0.8, 2.7]
+    # [rad/s, rad/s^2]: the rotation shim's in-place turn rate (rotate_to_heading_angular_vel 0.7)
+    # and the stack's angular acceleration limit (3.74). The DCC1000-era skid steer turned at only
+    # ~0.5 rad/s for a 1.0 command (2026-09-27). ASSUMPTION until re-measured.
+    angular: [0.7, 3.74]
   profile:
     # Circle around the 0.923 x 0.802 m footprint (isaacbot_amr_navigation bringup.launch.py, CAD tyre
     # edges + 0.04 m, 2026-10-07): radius = hypot(0.4614, 0.4008) = 0.61 m.

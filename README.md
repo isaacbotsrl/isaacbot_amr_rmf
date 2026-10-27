@@ -222,11 +222,11 @@ import with the same name overrides a built-in site.
 - RMF only drives in AUTOMATIC. Moving the web joystick takes over to ASSISTED and cancels the
   order, and RMF then replans.
 - **Known isaacbot issues:**
-  - The wheel PID overshoots goals.
-  - The skid steer turns slowly in place; the 60 s stall watchdog makes RMF replan.
+  - Goal overshoot and slow in-place turns were DCC1000-era (host wheel PIDs); re-check them
+    with the DCC1020 drive. The 60 s stall watchdog makes RMF replan if a turn stalls.
   - Nav 2 bringup aborts if the RS16 lidar is silent at boot, so check that the isaacbot is
     localized (`positionInitialized` true) before dispatching.
-- `isaacbot_amr_fleet` limits (0.5 m/s) only shape RMF's schedule. Nav 2's own limits drive the isaacbot.
+- `isaacbot_amr_fleet` limits (0.8 m/s) only shape RMF's schedule. Nav 2's own limits drive the isaacbot.
 
 ## Dashboard
 
