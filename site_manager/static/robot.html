@@ -97,6 +97,11 @@ function renderFacts(r) {
           <option value="delivery" ${r.delivery ? 'selected' : ''}>the delivery portal</option></select>
         <button data-save-delivery>Save</button><span class="muted">never both; changing it restarts RMF</span>
         ${r.delivery && r.broker_auth ? '<button data-delivery-password>New portal broker password</button>' : ''}</dd>
+      ${r.delivery ? `<dt></dt><dd><div class="message">On this robot's balenaCloud device, also set
+        <code>ISAACBOT_AMR_SYSTEM_USE_GPS=true</code> and <code>ISAACBOT_AMR_ORCH_NAV_PROFILE=delivery</code>
+        (Nav 2's global costmap must roll with the robot on live outdoor maps). The robot raises
+        <code>gpsNoFix</code> / <code>navProfileIndoor</code> warnings in the delivery portal until they are set.
+        Back with RMF: <code>ISAACBOT_AMR_ORCH_NAV_PROFILE=indoor</code>.</div></dd>` : ''}
       <dt>SSH</dt><dd><input type="text" id="ssh" value="${esc(r.ssh)}" placeholder="root@192.168.1.201:24" size="24">
         <button data-save-ssh>Save</button><span class="muted">where this robot's saved maps are read from; empty for none</span></dd>
       ${r.ssh_shared_with.length ? `<dt></dt><dd><div class="message bad">⚠ ${r.ssh_shared_with.map((n) => `<a href="/robots/${encodeURIComponent(n)}">${esc(n)}</a>`).join(', ')}
