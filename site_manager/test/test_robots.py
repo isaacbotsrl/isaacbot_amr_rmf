@@ -182,3 +182,22 @@ def test_robots_json_one_field_per_line_and_old_files_load(tmp_path):
 def test_merge_ignores_ssh():
     config = robots.apply_to_fleet(template(), [Robot('ardennes', 'k', ssh='root@h')])
     assert 'ssh' not in yaml.safe_dump(config)
+
+
+def test_delivery_robots_stay_out_of_rmf_and_go_to_the_portal_login():
+    d = Robot('courier', 'ardennis-3420987-d', delivery=True)
+    config = robots.apply_to_fleet(template(), [K, d], waypoints=None)
+    assert list(config['rmf_fleet']['robots']) == ['ardennes']
+    assert list(config['vda5050']['robots']) == ['ardennes']
+    acl = robots.render_acl([K, d])
+    assert 'user courier\ntopic readwrite uagv/v2/IsaacBot/ardennis-3420987-d/#\n' in acl
+    assert acl.endswith('user delivery\ntopic readwrite uagv/v2/IsaacBot/ardennis-3420987-d/#\n')
+    assert 'user delivery' not in robots.render_acl([K, E])     # no delivery robot, no login
+
+
+def test_delivery_flag_round_trips_and_old_files_default_to_rmf(tmp_path):
+    path = str(tmp_path / 'robots.json')
+    robots.save(path, [K, Robot('courier', 'd', delivery=True)])
+    assert [r.delivery for r in robots.load(path)] == [False, True]
+    (tmp_path / 'old.json').write_text('{"robots": [{"name": "a", "serial_number": "s"}]}')
+    assert robots.load(str(tmp_path / 'old.json'))[0].delivery is False

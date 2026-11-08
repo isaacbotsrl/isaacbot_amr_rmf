@@ -443,11 +443,13 @@ class SiteManager:
         }
 
     def update_robot(self, name: str, request: dict) -> dict:
-        """Change a robot's charger and/or ssh address (its identity and login stay)."""
+        """Change a robot's charger, ssh address and/or delivery flag (identity and login stay)."""
         changes = {k: request[k].strip() for k in ('charger', 'ssh')
                    if isinstance(request.get(k), str)}
+        if isinstance(request.get('delivery'), bool):
+            changes['delivery'] = request['delivery']
         if not changes:
-            raise RequestError('nothing to change: send charger and/or ssh')
+            raise RequestError('nothing to change: send charger, ssh and/or delivery')
         waypoints = (self._active_site() or {}).get('waypoints')
         if changes.get('charger') and waypoints and changes['charger'] not in waypoints:
             raise RobotError(f'{changes["charger"]!r} is not a waypoint of the active site')
@@ -457,8 +459,12 @@ class SiteManager:
             updated = fleet_robots.validate(replace(robot, **changes))
             if 'ssh' in changes:
                 fleet_robots.check_ssh_unique(robots, updated)
-            fleet_robots.save(self.robots_path,
-                              [updated if r.name == name else r for r in robots])
+            robots = [updated if r.name == name else r for r in robots]
+            if all(r.delivery for r in robots):
+                raise RequestError('RMF needs at least one robot: keep one out of deliveries')
+            fleet_robots.save(self.robots_path, robots)
+            if 'delivery' in changes and self.broker_auth:
+                self.broker_auth.write_acl(robots)  # the portal's login follows the flag
         self._access.pop(name, None)
         return asdict(updated)
 
@@ -470,7 +476,8 @@ class SiteManager:
         robot = Robot(name=field('name'), serial_number=field('serial_number'),
                       manufacturer=field('manufacturer') or fleet_robots.DEFAULT_MANUFACTURER,
                       login=field('login'), charger=field('charger'), ssh=field('ssh'))
-        reserved = (self.broker_auth.master_login,) if self.broker_auth else ()
+        reserved = ((self.broker_auth.master_login, fleet_robots.DELIVERY_LOGIN)
+                    if self.broker_auth else ())
         fleet_robots.validate(robot, reserved)
         waypoints = (self._active_site() or {}).get('waypoints')
         if robot.charger and waypoints and robot.charger not in waypoints:
@@ -494,6 +501,22 @@ class SiteManager:
             password = self._set_login(robot, robots)
         return self._credentials(robot, password)
 
+    def delivery_password(self) -> dict:
+        """A new password for the delivery portal's broker login (shown once, not stored)."""
+        if self.broker_auth is None:
+            raise RequestError('this broker has no logins (local compose): the portal needs none')
+        with self._lock:
+            robots = self._robot_list()
+            if fleet_robots.DELIVERY_LOGIN in {r.broker_login for r in robots}:
+                raise RobotConflict(f'a robot uses the login {fleet_robots.DELIVERY_LOGIN!r}')
+            password = fleet_robots.make_password()
+            self.broker_auth.set_password(fleet_robots.DELIVERY_LOGIN, password)
+            self.broker_auth.write_acl(robots)
+        host, port = self.robot_broker
+        return {'login': fleet_robots.DELIVERY_LOGIN, 'password': password,
+                'env': {'MQTT_HOST': str(host), 'MQTT_PORT': str(port),
+                        'MQTT_USER': fleet_robots.DELIVERY_LOGIN, 'MQTT_PASSWORD': password}}
+
     def delete_robot(self, name: str) -> dict:
         with self._lock:
             robots = self._robot_list()
@@ -501,6 +524,8 @@ class SiteManager:
             if len(robots) == 1:
                 raise RequestError('the fleet needs at least one robot; add the new one first')
             robots = [r for r in robots if r.name != name]
+            if all(r.delivery for r in robots):
+                raise RequestError('RMF needs at least one robot: keep one out of deliveries')
             fleet_robots.save(self.robots_path, robots)
             if self.broker_auth:
                 self.broker_auth.write_acl(robots)
@@ -691,6 +716,8 @@ def make_handler(manager: SiteManager, static_dir: str, password: str = ''):
                 return self._call(lambda: manager.activate(self._body()))
             if self.path == '/api/robots':
                 return self._call(lambda: manager.add_robot(self._body()))
+            if self.path == '/api/delivery/password':
+                return self._call(manager.delivery_password)
             match = re.fullmatch(r'/api/robots/([^/]+)/(password|import)', unquote(self.path))
             if match and match.group(2) == 'password':
                 return self._call(lambda: manager.rotate_password(match.group(1)))

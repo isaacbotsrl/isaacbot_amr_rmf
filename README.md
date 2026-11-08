@@ -330,6 +330,14 @@ On the main page:
   the new password.
 - **Remove** drops the robot's login, its ACL entry and its RMF entry. The last robot cannot be
   removed.
+- **Commanded by** (on a robot's page) hands the robot to the
+  [delivery portal](https://github.com/isaacbotsrl/isaacbot_amr_delivery_portal) or gives it
+  back to RMF.
+  - A delivery robot leaves RMF's fleet config (RMF restarts), and the portal's broker login
+    `delivery` gets its topics. RMF and the portal never both command a robot.
+  - At least one robot stays with RMF.
+  - **New portal broker password** sets that login's password and shows the portal's `MQTT_*`
+    settings **once**.
 
 Behind it:
 - The logins and ACL live in the `broker-auth` volume. On first start they are seeded from

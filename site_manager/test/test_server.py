@@ -476,3 +476,35 @@ def test_http_patch_robot(http):
     assert code == 200 and json.loads(body)['ssh'] == 'root@10.0.0.9'
     assert request(f'{http}/api/robots/ardennes', 'PATCH', {'ssh': 'bad'})[0] == 400
     assert request(f'{http}/api/robots/nobody', 'PATCH', {'ssh': 'root@h'})[0] == 404
+
+
+def test_delivery_flag_restarts_rmf_and_opens_the_portal_login(robot_manager):
+    auth = robot_manager.broker_auth
+    robot_manager.add_robot({'name': 'courier', 'serial_number': 'ardennis-3420987-d'})
+    before = rmf_fingerprint(robot_manager.robots_path)
+    assert robot_manager.update_robot('courier', {'delivery': True})['delivery'] is True
+    assert rmf_fingerprint(robot_manager.robots_path) != before     # RMF drops it
+    assert 'user delivery\ntopic readwrite uagv/v2/IsaacBot/ardennis-3420987-d/#' in \
+        open(auth.acl_path).read()
+    listed = {r['name']: r['delivery'] for r in robot_manager.robots()['robots']}
+    assert listed == {'ardennes': False, 'courier': True}
+    with pytest.raises(server.RequestError, match='at least one robot'):
+        robot_manager.update_robot('ardennes', {'delivery': True})
+    with pytest.raises(server.RequestError, match='at least one robot'):
+        robot_manager.delete_robot('ardennes')
+
+    creds = robot_manager.delivery_password()
+    assert creds['env']['MQTT_USER'] == 'delivery' and creds['env']['MQTT_HOST'] == '10.8.0.1'
+    line = next(li for li in open(auth.passwd_path).read().splitlines()
+                if li.startswith('delivery:'))
+    assert server.fleet_robots.check_password(creds['password'], line.split(':', 1)[1])
+    with pytest.raises(server.RobotError, match='reserved'):
+        robot_manager.add_robot({'name': 'delivery', 'serial_number': 'x'})
+
+    robot_manager.update_robot('courier', {'delivery': False})
+    assert 'user delivery' not in open(auth.acl_path).read()
+
+
+def test_delivery_password_needs_broker_logins(manager):
+    with pytest.raises(server.RequestError, match='no logins'):
+        manager.delivery_password()

@@ -80,7 +80,7 @@ function renderFacts(r) {
   // The editable settings are re-rendered only when they changed on the server, not every
   // refresh: an open select or a half-typed address must survive the 3 s poll.
   const key = JSON.stringify([r.charger, r.ssh, r.waypoints, r.site_charger, r.broker_auth,
-                              r.ssh_shared_with]);
+                              r.ssh_shared_with, r.delivery]);
   if (key === settingsKey) return;
   settingsKey = key;
   const chargers = ['', ...r.waypoints].map((w) =>
@@ -92,6 +92,11 @@ function renderFacts(r) {
         <button data-robot-password>New password</button>` : '<span class="muted">none (anonymous broker)</span>'}</dd>
       <dt>Charger</dt><dd><select id="charger">${chargers}</select>
         <button data-save-charger>Save</button><span class="muted">changing it restarts RMF</span></dd>
+      <dt>Commanded by</dt><dd><select id="delivery">
+          <option value="rmf" ${r.delivery ? '' : 'selected'}>RMF (patrols, tasks)</option>
+          <option value="delivery" ${r.delivery ? 'selected' : ''}>the delivery portal</option></select>
+        <button data-save-delivery>Save</button><span class="muted">never both; changing it restarts RMF</span>
+        ${r.delivery && r.broker_auth ? '<button data-delivery-password>New portal broker password</button>' : ''}</dd>
       <dt>SSH</dt><dd><input type="text" id="ssh" value="${esc(r.ssh)}" placeholder="root@192.168.1.201:24" size="24">
         <button data-save-ssh>Save</button><span class="muted">where this robot's saved maps are read from; empty for none</span></dd>
       ${r.ssh_shared_with.length ? `<dt></dt><dd><div class="message bad">⚠ ${r.ssh_shared_with.map((n) => `<a href="/robots/${encodeURIComponent(n)}">${esc(n)}</a>`).join(', ')}
@@ -210,6 +215,19 @@ onButtons({
   'refresh-maps': () => refreshMaps(),
   import: (b, name) => importMap(name, b),
   saveCharger: () => save({charger: $('charger').value}, 'Charger saved; RMF restarts with it now.'),
+  saveDelivery: () => {
+    const delivery = $('delivery').value === 'delivery';
+    return save({delivery}, delivery
+      ? `${NAME} now takes orders from the delivery portal; RMF restarts without it.`
+      : `${NAME} is back with RMF; RMF restarts with it.`);
+  },
+  deliveryPassword: async () => {
+    if (!confirm('Give the delivery portal a new broker password? The portal is cut off from the fleet until its .env has it.')) return;
+    const c = await api('POST', '/api/delivery/password');
+    $('robot-result').innerHTML = `<div class="message ok">New password for the portal's login
+      <code>${esc(c.login)}</code>. Put these in the portal's <code>.env</code> (shown once):
+      <pre>${esc(Object.entries(c.env).map(([k, v]) => `${k}=${v}`).join('\n'))}</pre></div>`;
+  },
   saveSsh: async () => {
     await save({ssh: $('ssh').value.trim()}, 'SSH address saved.');
     refreshMaps();
